@@ -3,12 +3,130 @@ package tui
 import (
 	"bored/azdo"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// parseMentions extracts @mentions from comment HTML and returns formatted text
+// with highlighted mentions. The format is:
+// <a href=\"#\" data-vss-mention=\"version:2.0,{user-guid}\">@Display Name</a>
+func parseMentions(text string, orgURL string) string {
+	// Regex to match mention anchor tags
+	mentionRegex := regexp.MustCompile(`<a[^>]*data-vss-mention=\"version:[^,]*,([^\"]*)\"[^>]*>@([^<]*)</a>`)
+
+	// Style for mentions - just color and bold, no hyperlinking
+	// OSC 8 hyperlinks are incompatible with bubbletea/lipgloss rendering
+	mentionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("39")).
+		Bold(true)
+
+	result := mentionRegex.ReplaceAllStringFunc(text, func(match string) string {
+		submatches := mentionRegex.FindStringSubmatch(match)
+		if len(submatches) >= 3 {
+			displayName := submatches[2]
+			// Just style the mention without hyperlinking
+			return mentionStyle.Render("@" + displayName)
+		}
+		return match
+	})
+
+	return result
+}
+
+// parseURLs finds URLs in text and highlights them (no hyperlinking to avoid terminal issues)
+func parseURLs(text string) string {
+	// Regex to match URLs (http, https, ftp) - more restrictive to avoid matching escape sequences
+	urlRegex := regexp.MustCompile(`(https?://[^\s<>"\x1b]+)`)
+
+	// Style for URLs - using blue color
+	urlStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("33"))
+
+	// Replace URLs with styled versions (no OSC 8 hyperlinks)
+	result := urlRegex.ReplaceAllStringFunc(text, func(match string) string {
+		// Clean up any trailing punctuation that might have been captured
+		cleanURL := strings.TrimRight(match, ".,;:!?)")
+		trailingChars := match[len(cleanURL):]
+
+		// Just style the URL text without hyperlinking
+		return urlStyle.Render(cleanURL) + trailingChars
+	})
+
+	return result
+}
+
+// parseHTMLLinks extracts URLs from HTML anchor tags and highlights them (no hyperlinking)
+func parseHTMLLinks(text string) string {
+	// Regex to match HTML anchor tags with href (but not vss-mention tags)
+	linkRegex := regexp.MustCompile(`<a[^>]*href=\"([^\"]+)\"[^>]*>([^<]*)</a>`)
+
+	// Style for links - blue color
+	linkStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("33"))
+
+	result := linkRegex.ReplaceAllStringFunc(text, func(match string) string {
+		// Skip mention tags (they're handled separately)
+		if strings.Contains(match, "data-vss-mention") {
+			return match
+		}
+
+		submatches := linkRegex.FindStringSubmatch(match)
+		if len(submatches) >= 3 {
+			url := submatches[1]
+			linkText := submatches[2]
+
+			// Skip anchor-only links
+			if url == "#" || url == "" {
+				return linkText
+			}
+
+			// Just style the link text without hyperlinking
+			// Show both the text and URL if they differ
+			if linkText != url && linkText != "" {
+				return linkStyle.Render(linkText) + " (" + linkStyle.Render(url) + ")"
+			}
+			return linkStyle.Render(url)
+		}
+		return match
+	})
+
+	return result
+}
+
+// stripHTMLTags removes common HTML tags from text while preserving mentions and URLs
+func stripHTMLTags(text string, orgURL string) string {
+	// First, process mentions to preserve them
+	text = parseMentions(text, orgURL)
+
+	// Then process HTML anchor tags with URLs (before stripping tags)
+	text = parseHTMLLinks(text)
+
+	// Strip common HTML tags
+	text = strings.ReplaceAll(text, "<div>", "")
+	text = strings.ReplaceAll(text, "</div>", "")
+	text = strings.ReplaceAll(text, "<br>", "\n")
+	text = strings.ReplaceAll(text, "<br/>", "\n")
+	text = strings.ReplaceAll(text, "<br />", "\n")
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "<p>", "")
+	text = strings.ReplaceAll(text, "</p>", "\n")
+
+	// Remove any remaining HTML tags (but not our OSC 8 sequences)
+	tagRegex := regexp.MustCompile(`<[^>]+>`)
+	text = tagRegex.ReplaceAllString(text, "")
+
+	// Finally, process any plain-text URLs that weren't in anchor tags
+	text = parseURLs(text)
+
+	return strings.TrimSpace(text)
+}
 
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -487,6 +605,12 @@ func (m Model) viewDetail() string {
 			b.WriteString("\n")
 		}
 
+		// Get the organization URL for mention links
+		orgURL := ""
+		if m.client != nil {
+			orgURL = fmt.Sprintf("https://dev.azure.com/%s", m.client.Organization)
+		}
+
 		for i := start; i < end; i++ {
 			c := m.comments[i]
 			dateStr := ""
@@ -494,11 +618,8 @@ func (m Model) viewDetail() string {
 				dateStr = t.Format("Jan 02, 15:04")
 			}
 			header := fmt.Sprintf("%s - %s", c.CreatedBy.DisplayName, dateStr)
-			text := c.Text
-			// Strip HTML tags (basic)
-			text = strings.ReplaceAll(text, "<div>", "")
-			text = strings.ReplaceAll(text, "</div>", "")
-			text = strings.ReplaceAll(text, "<br>", "\n")
+			// Process mentions and strip HTML tags
+			text := stripHTMLTags(c.Text, orgURL)
 			if len(text) > 200 {
 				text = text[:197] + "..."
 			}
