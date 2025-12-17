@@ -14,6 +14,18 @@ import (
 func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Calculate page info
+		maxVisible := m.height - 12
+		if maxVisible < 5 {
+			maxVisible = 10
+		}
+		pageSize := maxVisible
+		totalPages := (len(m.workItems) + pageSize - 1) / pageSize
+		if totalPages == 0 {
+			totalPages = 1
+		}
+		currentPage := m.cursor / pageSize
+
 		switch msg.String() {
 		case "up", "k":
 			if m.cursor > 0 {
@@ -22,6 +34,25 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.cursor < len(m.workItems)-1 {
 				m.cursor++
+			}
+		case "left", "h", "pgup":
+			// Previous page
+			if currentPage > 0 {
+				m.cursor = (currentPage - 1) * pageSize
+			}
+		case "right", "l", "pgdown":
+			// Next page
+			if currentPage < totalPages-1 {
+				m.cursor = (currentPage + 1) * pageSize
+				if m.cursor >= len(m.workItems) {
+					m.cursor = len(m.workItems) - 1
+				}
+			}
+		case "home":
+			m.cursor = 0
+		case "end":
+			if len(m.workItems) > 0 {
+				m.cursor = len(m.workItems) - 1
 			}
 		case "r":
 			m.loading = true
@@ -109,7 +140,7 @@ func (m Model) viewBoard() string {
 		b.WriteString("\n")
 	} else {
 		// Column definitions: ID, Title, Assigned To, State, Area Path, Tags, Comments, Activity Date
-		colID := lipgloss.NewStyle().Width(7).Align(lipgloss.Left)
+		colID := lipgloss.NewStyle().Width(10).Align(lipgloss.Left).MarginRight(2)
 		colTitle := lipgloss.NewStyle().Width(30).Align(lipgloss.Left)
 		colAssigned := lipgloss.NewStyle().Width(15).Align(lipgloss.Left)
 		colState := lipgloss.NewStyle().Width(10).Align(lipgloss.Left)
@@ -135,21 +166,29 @@ func (m Model) viewBoard() string {
 		b.WriteString(strings.Repeat("─", 110))
 		b.WriteString("\n")
 
-		start := 0
-		end := len(m.workItems)
+		// Calculate pagination
 		maxVisible := m.height - 12
 		if maxVisible < 5 {
 			maxVisible = 10
 		}
+		pageSize := maxVisible
+		totalPages := (len(m.workItems) + pageSize - 1) / pageSize
+		if totalPages == 0 {
+			totalPages = 1
+		}
+		currentPage := m.cursor / pageSize
 
-		if len(m.workItems) > maxVisible {
-			if m.cursor >= maxVisible {
-				start = m.cursor - maxVisible + 1
-			}
-			end = start + maxVisible
-			if end > len(m.workItems) {
-				end = len(m.workItems)
-			}
+		start := currentPage * pageSize
+		end := start + pageSize
+		if end > len(m.workItems) {
+			end = len(m.workItems)
+		}
+
+		// Show page indicator
+		if totalPages > 1 {
+			pageInfo := fmt.Sprintf("Page %d of %d (%d items)", currentPage+1, totalPages, len(m.workItems))
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(pageInfo))
+			b.WriteString("\n\n")
 		}
 
 		for i := start; i < end; i++ {
@@ -222,7 +261,7 @@ func (m Model) viewBoard() string {
 	}
 
 	b.WriteString("\n")
-	helpText := "↑/k ↓/j: navigate • c/n: create • r: refresh"
+	helpText := "↑/k ↓/j: navigate • ←/h →/l: page • c/n: create • r: refresh"
 	if m.username != "" {
 		if m.showAll {
 			helpText += " • a: show mine"

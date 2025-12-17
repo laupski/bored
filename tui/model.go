@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bored/azdo"
+	"fmt"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -255,7 +256,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.message = "Created work item #" + string(rune(msg.item.ID+'0'))
+		m.message = fmt.Sprintf("Created work item #%d", msg.item.ID)
 		m.view = ViewBoard
 		for i := range m.createInputs {
 			m.createInputs[i].SetValue("")
