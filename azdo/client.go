@@ -14,6 +14,7 @@ type Client struct {
 	Organization string
 	Project      string
 	Team         string
+	AreaPath     string
 	PAT          string
 	httpClient   *http.Client
 }
@@ -89,11 +90,12 @@ type WorkItemTypesResponse struct {
 	Value []WorkItemType `json:"value"`
 }
 
-func NewClient(org, project, team, pat string) *Client {
+func NewClient(org, project, team, areaPath, pat string) *Client {
 	return &Client{
 		Organization: org,
 		Project:      project,
 		Team:         team,
+		AreaPath:     areaPath,
 		PAT:          pat,
 		httpClient:   &http.Client{},
 	}
@@ -126,6 +128,9 @@ func (c *Client) GetWorkItemsFiltered(workItemType, assignedTo string, top int) 
 	}
 	if assignedTo != "" {
 		query += fmt.Sprintf(" AND [System.AssignedTo] = '%s'", assignedTo)
+	}
+	if c.AreaPath != "" {
+		query += fmt.Sprintf(" AND [System.AreaPath] UNDER '%s'", c.AreaPath)
 	}
 	query += " ORDER BY [System.ChangedDate] DESC"
 
@@ -222,6 +227,9 @@ func (c *Client) CreateWorkItem(workItemType, title, description string, priorit
 	}
 	if priority > 0 {
 		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/Microsoft.VSTS.Common.Priority", Value: priority})
+	}
+	if c.AreaPath != "" {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/System.AreaPath", Value: c.AreaPath})
 	}
 
 	jsonBody, _ := json.Marshal(ops)

@@ -24,19 +24,20 @@ func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.updateConfigFocus()
 		case "enter":
-			if m.configInputs[0].Value() != "" && m.configInputs[1].Value() != "" && m.configInputs[2].Value() != "" && m.configInputs[3].Value() != "" {
+			if m.configInputs[0].Value() != "" && m.configInputs[1].Value() != "" && m.configInputs[2].Value() != "" && m.configInputs[3].Value() != "" && m.configInputs[4].Value() != "" && m.configInputs[5].Value() != "" {
 				org := m.configInputs[0].Value()
 				project := m.configInputs[1].Value()
 				team := m.configInputs[2].Value()
-				pat := m.configInputs[3].Value()
-				username := m.configInputs[4].Value()
+				areaPath := m.configInputs[3].Value()
+				pat := m.configInputs[4].Value()
+				username := m.configInputs[5].Value()
 
-				m.client = azdo.NewClient(org, project, team, pat)
+				m.client = azdo.NewClient(org, project, team, areaPath, pat)
 				m.username = username
 				m.loading = true
 
 				// Save credentials to keychain
-				if err := SaveCredentials(org, project, team, pat, username); err != nil {
+				if err := SaveCredentials(org, project, team, areaPath, pat, username); err != nil {
 					m.keychainMessage = "Warning: Could not save to keychain"
 				} else {
 					m.keychainMessage = "Credentials saved to keychain"
@@ -52,6 +53,7 @@ func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.configInputs[2].SetValue("")
 			m.configInputs[3].SetValue("")
 			m.configInputs[4].SetValue("")
+			m.configInputs[5].SetValue("")
 			m.keychainLoaded = false
 			m.keychainMessage = "Credentials cleared from keychain"
 			return m, nil
@@ -89,7 +91,7 @@ func (m Model) viewConfig() string {
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
-	labels := []string{"Organization", "Project", "Team", "Personal Access Token", "Username (for filtering)"}
+	labels := []string{"Organization", "Project", "Team", "Area Path", "Personal Access Token", "Username"}
 
 	for i, label := range labels {
 		style := labelStyle

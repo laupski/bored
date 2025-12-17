@@ -102,6 +102,14 @@ func (m Model) viewCreate() string {
 	b.WriteString(strings.Join(types, " "))
 	b.WriteString("\n\n")
 
+	// Show configured area path
+	if m.client != nil && m.client.AreaPath != "" {
+		b.WriteString(labelStyle.Render("Area Path"))
+		b.WriteString("\n")
+		b.WriteString(normalStyle.Foreground(lipgloss.Color("39")).Render(m.client.AreaPath))
+		b.WriteString("\n\n")
+	}
+
 	if m.err != nil {
 		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
 		b.WriteString("\n\n")
