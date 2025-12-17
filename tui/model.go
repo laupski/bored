@@ -79,13 +79,6 @@ var (
 	labelStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("39")).
 			Bold(true)
-
-	stateColors = map[string]lipgloss.Color{
-		"New":      lipgloss.Color("39"),
-		"Active":   lipgloss.Color("220"),
-		"Resolved": lipgloss.Color("40"),
-		"Closed":   lipgloss.Color("241"),
-	}
 )
 
 func NewModel() Model {
