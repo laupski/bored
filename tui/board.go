@@ -195,17 +195,12 @@ func (m Model) viewBoard() string {
 				}
 			}
 
-			stateStyle := colState
-			if color, ok := stateColors[state]; ok {
-				stateStyle = stateStyle.Foreground(color)
-			}
-
 			row := lipgloss.JoinHorizontal(
 				lipgloss.Top,
 				colID.Render(id),
 				colTitle.Render(title),
 				colAssigned.Render(assignedTo),
-				stateStyle.Render(state),
+				colState.Render(state),
 				colArea.Render(areaPath),
 				colTags.Render(tags),
 				colComments.Render(comments),

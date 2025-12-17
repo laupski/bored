@@ -84,7 +84,6 @@ var (
 		"Active":   lipgloss.Color("220"),
 		"Resolved": lipgloss.Color("40"),
 		"Closed":   lipgloss.Color("241"),
-		"Done":     lipgloss.Color("40"),
 	}
 )
 

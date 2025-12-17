@@ -43,18 +43,18 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.addComment(m.selectedItem.ID, m.detailInputs[4].Value())
 			}
 			return m, nil
-		case "v":
+		case "ctrl+e":
 			// Toggle comments expanded/collapsed
 			m.commentsExpanded = !m.commentsExpanded
 			m.commentScroll = 0
 			return m, nil
-		case "j":
+		case "ctrl+n":
 			// Scroll comments down when expanded
 			if m.commentsExpanded && m.commentScroll < len(m.comments)-1 {
 				m.commentScroll++
 			}
 			return m, nil
-		case "k":
+		case "ctrl+p":
 			// Scroll comments up when expanded
 			if m.commentsExpanded && m.commentScroll > 0 {
 				m.commentScroll--
@@ -150,11 +150,11 @@ func (m Model) viewDetail() string {
 	if m.commentsExpanded {
 		b.WriteString(commentHeaderStyle.Render(fmt.Sprintf("▼ Comments (%d)", len(m.comments))))
 		b.WriteString(" ")
-		b.WriteString(hintStyle.Render("(v: collapse, j/k: scroll)"))
+		b.WriteString(hintStyle.Render("(ctrl+e: collapse, ctrl+n/p: scroll)"))
 	} else {
 		b.WriteString(labelStyle.Render(fmt.Sprintf("▶ Comments (%d)", len(m.comments))))
 		b.WriteString(" ")
-		b.WriteString(hintStyle.Render("(v: expand)"))
+		b.WriteString(hintStyle.Render("(ctrl+e: expand)"))
 	}
 	b.WriteString("\n")
 
@@ -231,9 +231,9 @@ func (m Model) viewDetail() string {
 
 	b.WriteString("\n")
 	if m.commentsExpanded {
-		b.WriteString(helpStyle.Render("v: collapse comments • j/k: scroll • esc: back"))
+		b.WriteString(helpStyle.Render("ctrl+e: collapse comments • ctrl+n/p: scroll • esc: back"))
 	} else {
-		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • enter: add comment • v: view comments • esc: back"))
+		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • enter: add comment • ctrl+e: view comments • esc: back"))
 	}
 
 	return boxStyle.Render(b.String())
