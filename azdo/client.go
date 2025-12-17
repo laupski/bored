@@ -13,6 +13,7 @@ import (
 type Client struct {
 	Organization string
 	Project      string
+	Team         string
 	PAT          string
 	httpClient   *http.Client
 }
@@ -88,10 +89,11 @@ type WorkItemTypesResponse struct {
 	Value []WorkItemType `json:"value"`
 }
 
-func NewClient(org, project, pat string) *Client {
+func NewClient(org, project, team, pat string) *Client {
 	return &Client{
 		Organization: org,
 		Project:      project,
+		Team:         team,
 		PAT:          pat,
 		httpClient:   &http.Client{},
 	}
@@ -104,6 +106,13 @@ func (c *Client) authHeader() string {
 
 func (c *Client) baseURL() string {
 	return fmt.Sprintf("https://dev.azure.com/%s/%s", c.Organization, c.Project)
+}
+
+func (c *Client) teamURL() string {
+	if c.Team != "" {
+		return fmt.Sprintf("https://dev.azure.com/%s/%s/%s", c.Organization, c.Project, c.Team)
+	}
+	return c.baseURL()
 }
 
 func (c *Client) GetWorkItems(workItemType string, top int) ([]WorkItem, error) {
@@ -120,7 +129,9 @@ func (c *Client) GetWorkItemsFiltered(workItemType, assignedTo string, top int) 
 	}
 	query += " ORDER BY [System.ChangedDate] DESC"
 
-	wiqlURL := fmt.Sprintf("%s/_apis/wit/wiql?api-version=7.0&$top=%d", c.baseURL(), top)
+	// Use team URL for WIQL queries when team is specified - the team context
+	// automatically scopes queries to the team's configured area paths
+	wiqlURL := fmt.Sprintf("%s/_apis/wit/wiql?api-version=7.0&$top=%d", c.teamURL(), top)
 
 	body := map[string]string{"query": query}
 	jsonBody, _ := json.Marshal(body)

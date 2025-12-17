@@ -89,7 +89,7 @@ var (
 )
 
 func NewModel() Model {
-	configInputs := make([]textinput.Model, 4)
+	configInputs := make([]textinput.Model, 5)
 
 	configInputs[0] = textinput.New()
 	configInputs[0].Placeholder = "myorg"
@@ -103,15 +103,20 @@ func NewModel() Model {
 	configInputs[1].Prompt = ""
 
 	configInputs[2] = textinput.New()
-	configInputs[2].Placeholder = "your-personal-access-token"
+	configInputs[2].Placeholder = "MyTeam"
 	configInputs[2].Width = 40
-	configInputs[2].EchoMode = textinput.EchoPassword
 	configInputs[2].Prompt = ""
 
 	configInputs[3] = textinput.New()
-	configInputs[3].Placeholder = "user@email.com (optional, for filtering)"
+	configInputs[3].Placeholder = "your-personal-access-token"
 	configInputs[3].Width = 40
+	configInputs[3].EchoMode = textinput.EchoPassword
 	configInputs[3].Prompt = ""
+
+	configInputs[4] = textinput.New()
+	configInputs[4].Placeholder = "user@email.com (optional, for filtering)"
+	configInputs[4].Width = 40
+	configInputs[4].Prompt = ""
 
 	createInputs := make([]textinput.Model, 3)
 
@@ -167,11 +172,12 @@ func NewModel() Model {
 	}
 
 	// Try to load credentials from keychain
-	if org, project, pat, username, err := LoadCredentials(); err == nil {
+	if org, project, team, pat, username, err := LoadCredentials(); err == nil {
 		m.configInputs[0].SetValue(org)
 		m.configInputs[1].SetValue(project)
-		m.configInputs[2].SetValue(pat)
-		m.configInputs[3].SetValue(username)
+		m.configInputs[2].SetValue(team)
+		m.configInputs[3].SetValue(pat)
+		m.configInputs[4].SetValue(username)
 		m.username = username
 		m.keychainLoaded = true
 		m.keychainMessage = "Credentials loaded from keychain"
@@ -248,6 +254,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.workItems = msg.items
 		m.err = nil
+		m.message = ""
 		return m, nil
 
 	case createResultMsg:

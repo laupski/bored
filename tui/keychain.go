@@ -8,17 +8,23 @@ const (
 	keychainService = "bored-azdo-tui"
 	keychainOrgKey  = "organization"
 	keychainProjKey = "project"
+	keychainTeamKey = "team"
 	keychainPATKey  = "pat"
 	keychainUserKey = "username"
 )
 
 // SaveCredentials saves the Azure DevOps credentials to the system keychain
-func SaveCredentials(org, project, pat, username string) error {
+func SaveCredentials(org, project, team, pat, username string) error {
 	if err := keyring.Set(keychainService, keychainOrgKey, org); err != nil {
 		return err
 	}
 	if err := keyring.Set(keychainService, keychainProjKey, project); err != nil {
 		return err
+	}
+	if team != "" {
+		if err := keyring.Set(keychainService, keychainTeamKey, team); err != nil {
+			return err
+		}
 	}
 	if err := keyring.Set(keychainService, keychainPATKey, pat); err != nil {
 		return err
@@ -32,28 +38,31 @@ func SaveCredentials(org, project, pat, username string) error {
 }
 
 // LoadCredentials loads the Azure DevOps credentials from the system keychain
-func LoadCredentials() (org, project, pat, username string, err error) {
+func LoadCredentials() (org, project, team, pat, username string, err error) {
 	org, err = keyring.Get(keychainService, keychainOrgKey)
 	if err != nil {
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
 	project, err = keyring.Get(keychainService, keychainProjKey)
 	if err != nil {
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
+	// Team is optional, don't fail if not found
+	team, _ = keyring.Get(keychainService, keychainTeamKey)
 	pat, err = keyring.Get(keychainService, keychainPATKey)
 	if err != nil {
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
 	// Username is optional, don't fail if not found
 	username, _ = keyring.Get(keychainService, keychainUserKey)
-	return org, project, pat, username, nil
+	return org, project, team, pat, username, nil
 }
 
 // ClearCredentials removes the stored credentials from the keychain
 func ClearCredentials() error {
 	_ = keyring.Delete(keychainService, keychainOrgKey)
 	_ = keyring.Delete(keychainService, keychainProjKey)
+	_ = keyring.Delete(keychainService, keychainTeamKey)
 	_ = keyring.Delete(keychainService, keychainPATKey)
 	_ = keyring.Delete(keychainService, keychainUserKey)
 	return nil
