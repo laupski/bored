@@ -14,6 +14,41 @@ import (
 func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle delete confirmation mode
+		if m.deletingWorkItem {
+			switch msg.String() {
+			case "esc":
+				m.deletingWorkItem = false
+				m.deleteConfirmInput = ""
+				return m, nil
+			case "enter":
+				// Check if the typed text matches the title
+				if m.deleteConfirmInput == m.deleteWorkItemTitle {
+					m.loading = true
+					m.deletingWorkItem = false
+					return m, m.deleteWorkItem(m.deleteWorkItemID)
+				}
+				// Wrong title - show error
+				m.err = fmt.Errorf("title does not match - deletion cancelled")
+				m.deletingWorkItem = false
+				m.deleteConfirmInput = ""
+				return m, nil
+			case "backspace":
+				if len(m.deleteConfirmInput) > 0 {
+					m.deleteConfirmInput = m.deleteConfirmInput[:len(m.deleteConfirmInput)-1]
+				}
+				return m, nil
+			default:
+				// Add character to input
+				if len(msg.String()) == 1 {
+					m.deleteConfirmInput += msg.String()
+				} else if msg.String() == "space" {
+					m.deleteConfirmInput += " "
+				}
+				return m, nil
+			}
+		}
+
 		// Calculate page info
 		maxVisible := m.height - 12
 		if maxVisible < 5 {
@@ -92,9 +127,13 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.detailFocus = 0
 				m.detailInputs[0].Focus()
 				m.comments = nil
+				m.parentItem = nil
+				m.childItems = nil
+				m.relatedExpanded = false
+				m.relatedCursor = 0
 				m.err = nil
 				m.message = ""
-				return m, m.fetchComments(wi.ID)
+				return m, tea.Batch(m.fetchComments(wi.ID), m.fetchRelatedItems(wi.ID))
 			}
 			return m, nil
 		case "c", "n":
@@ -104,8 +143,21 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i := 1; i < len(m.createInputs); i++ {
 				m.createInputs[i].Blur()
 			}
+			// Auto-populate assignee with username
+			m.createInputs[3].SetValue(m.username)
 			m.err = nil
 			m.message = ""
+			return m, nil
+		case "d":
+			// Start delete confirmation for selected work item
+			if len(m.workItems) > 0 && m.cursor < len(m.workItems) {
+				wi := m.workItems[m.cursor]
+				m.deletingWorkItem = true
+				m.deleteWorkItemID = wi.ID
+				m.deleteWorkItemTitle = wi.Fields.Title
+				m.deleteConfirmInput = ""
+				m.err = nil
+			}
 			return m, nil
 		case "q":
 			return m, tea.Quit
@@ -139,15 +191,16 @@ func (m Model) viewBoard() string {
 		b.WriteString("No work items found.")
 		b.WriteString("\n")
 	} else {
-		// Column definitions: ID, Title, Assigned To, State, Area Path, Tags, Comments, Activity Date
+		// Column definitions: ID, Title, Assigned To, State, Area Path, Tags, Comments, Related, Activity Date
 		colID := lipgloss.NewStyle().Width(10).Align(lipgloss.Left).MarginRight(2)
-		colTitle := lipgloss.NewStyle().Width(30).Align(lipgloss.Left)
-		colAssigned := lipgloss.NewStyle().Width(15).Align(lipgloss.Left)
-		colState := lipgloss.NewStyle().Width(10).Align(lipgloss.Left)
-		colArea := lipgloss.NewStyle().Width(15).Align(lipgloss.Left)
+		colTitle := lipgloss.NewStyle().Width(35).Align(lipgloss.Left)
+		colAssigned := lipgloss.NewStyle().Width(25).Align(lipgloss.Left)
+		colState := lipgloss.NewStyle().Width(12).Align(lipgloss.Left)
+		colArea := lipgloss.NewStyle().Width(18).Align(lipgloss.Left)
 		colTags := lipgloss.NewStyle().Width(15).Align(lipgloss.Left)
 		colComments := lipgloss.NewStyle().Width(4).Align(lipgloss.Left)
-		colActivity := lipgloss.NewStyle().Width(12).Align(lipgloss.Left)
+		colRelated := lipgloss.NewStyle().Width(4).Align(lipgloss.Left)
+		colActivity := lipgloss.NewStyle().Width(14).Align(lipgloss.Left)
 
 		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 		headerRow := lipgloss.JoinHorizontal(
@@ -159,11 +212,12 @@ func (m Model) viewBoard() string {
 			colArea.Inherit(headerStyle).Render("Area Path"),
 			colTags.Inherit(headerStyle).Render("Tags"),
 			colComments.Inherit(headerStyle).Render("💬"),
+			colRelated.Inherit(headerStyle).Render("🔗"),
 			colActivity.Inherit(headerStyle).Render("Activity"),
 		)
 		b.WriteString(headerRow)
 		b.WriteString("\n")
-		b.WriteString(strings.Repeat("─", 110))
+		b.WriteString(strings.Repeat("─", 140))
 		b.WriteString("\n")
 
 		// Calculate pagination
@@ -197,15 +251,15 @@ func (m Model) viewBoard() string {
 			id := fmt.Sprintf("#%d", wi.ID)
 
 			title := wi.Fields.Title
-			if len(title) > 28 {
-				title = title[:25] + "..."
+			if len(title) > 34 {
+				title = title[:31] + "..."
 			}
 
 			assignedTo := ""
 			if wi.Fields.AssignedTo != nil {
 				assignedTo = wi.Fields.AssignedTo.DisplayName
-				if len(assignedTo) > 13 {
-					assignedTo = assignedTo[:10] + "..."
+				if len(assignedTo) > 24 {
+					assignedTo = assignedTo[:21] + "..."
 				}
 			}
 
@@ -216,16 +270,25 @@ func (m Model) viewBoard() string {
 			if idx := strings.LastIndex(areaPath, "\\"); idx >= 0 {
 				areaPath = areaPath[idx+1:]
 			}
-			if len(areaPath) > 13 {
-				areaPath = areaPath[:10] + "..."
+			if len(areaPath) > 17 {
+				areaPath = areaPath[:14] + "..."
 			}
 
 			tags := wi.Fields.Tags
-			if len(tags) > 13 {
-				tags = tags[:10] + "..."
+			if len(tags) > 14 {
+				tags = tags[:11] + "..."
 			}
 
 			comments := fmt.Sprintf("%d", wi.Fields.CommentCount)
+
+			// Count hierarchy relations (parent + children)
+			relatedCount := 0
+			for _, rel := range wi.Relations {
+				if rel.Rel == "System.LinkTypes.Hierarchy-Reverse" || rel.Rel == "System.LinkTypes.Hierarchy-Forward" {
+					relatedCount++
+				}
+			}
+			related := fmt.Sprintf("%d", relatedCount)
 
 			activityDate := ""
 			if wi.Fields.ChangedDate != "" {
@@ -243,6 +306,7 @@ func (m Model) viewBoard() string {
 				colArea.Render(areaPath),
 				colTags.Render(tags),
 				colComments.Render(comments),
+				colRelated.Render(related),
 				colActivity.Render(activityDate),
 			)
 
@@ -261,16 +325,36 @@ func (m Model) viewBoard() string {
 	}
 
 	b.WriteString("\n")
-	helpText := "↑/k ↓/j: navigate • ←/h →/l: page • c/n: create • r: refresh"
-	if m.username != "" {
-		if m.showAll {
-			helpText += " • a: show mine"
-		} else {
-			helpText += " • a: show all"
+
+	// Show delete confirmation dialog
+	if m.deletingWorkItem {
+		deleteStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("196")).
+			Padding(0, 1)
+		warningStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true)
+
+		deletePrompt := fmt.Sprintf("⚠️  DELETE #%d\n\n", m.deleteWorkItemID)
+		deletePrompt += warningStyle.Render("To confirm deletion, type the title:") + "\n"
+		deletePrompt += fmt.Sprintf("\"%s\"\n\n", m.deleteWorkItemTitle)
+		deletePrompt += fmt.Sprintf("Your input: %s_\n\n", m.deleteConfirmInput)
+		deletePrompt += "enter: confirm • esc: cancel"
+		b.WriteString(deleteStyle.Render(deletePrompt))
+		b.WriteString("\n")
+	} else {
+		helpText := "↑/k ↓/j: navigate • ←/h →/l: page • c/n: create • d: delete • r: refresh"
+		if m.username != "" {
+			if m.showAll {
+				helpText += " • a: show mine"
+			} else {
+				helpText += " • a: show all"
+			}
 		}
+		helpText += " • e: edit • o: open • q: quit"
+		b.WriteString(helpStyle.Render(helpText))
 	}
-	helpText += " • e: edit • o: open • q: quit"
-	b.WriteString(helpStyle.Render(helpText))
 
 	return b.String()
 }

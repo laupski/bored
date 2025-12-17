@@ -45,6 +45,27 @@ type Model struct {
 	comments         []azdo.Comment
 	commentsExpanded bool
 	commentScroll    int
+	// Related work items
+	parentItem      *azdo.WorkItem
+	childItems      []azdo.WorkItem
+	relatedExpanded bool
+	relatedCursor   int // 0 = parent, 1+ = children
+	// Create related item state
+	creatingRelated       bool   // true when in create related item mode
+	createRelatedAsChild  bool   // true = create child, false = create parent
+	createRelatedTitle    string // title for the new related item
+	createRelatedType     int    // index into workItemTypes
+	createRelatedAssignee string // assignee for the new related item
+	createRelatedFocus    int    // 0 = title, 1 = assignee
+	// Delete confirmation state
+	confirmingDelete      bool // true when waiting for delete confirmation
+	confirmDeleteTargetID int  // ID of the item to unlink
+	confirmDeleteIsParent bool // true if removing parent link
+	// Delete work item state (on board screen)
+	deletingWorkItem    bool   // true when in delete confirmation mode
+	deleteWorkItemID    int    // ID of work item to delete
+	deleteWorkItemTitle string // Title of work item to delete (for confirmation)
+	deleteConfirmInput  string // User's typed confirmation
 }
 
 var (
@@ -116,7 +137,7 @@ func NewModel() Model {
 	configInputs[5].Width = 40
 	configInputs[5].Prompt = ""
 
-	createInputs := make([]textinput.Model, 3)
+	createInputs := make([]textinput.Model, 4)
 
 	createInputs[0] = textinput.New()
 	createInputs[0].Placeholder = "Work item title"
@@ -132,6 +153,11 @@ func NewModel() Model {
 	createInputs[2].Placeholder = "1-4"
 	createInputs[2].Width = 10
 	createInputs[2].Prompt = ""
+
+	createInputs[3] = textinput.New()
+	createInputs[3].Placeholder = "user@email.com"
+	createInputs[3].Width = 40
+	createInputs[3].Prompt = ""
 
 	// Detail view inputs: Title, State, Assigned To, Tags, Comment
 	detailInputs := make([]textinput.Model, 5)
@@ -295,6 +321,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = "Work item updated"
 		m.selectedItem = msg.item
 		return m, nil
+
+	case relatedItemsMsg:
+		if msg.err == nil {
+			m.parentItem = msg.parent
+			m.childItems = msg.children
+		}
+		return m, nil
+
+	case createRelatedMsg:
+		m.loading = false
+		m.creatingRelated = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		relType := "parent"
+		if msg.asChild {
+			relType = "child"
+		}
+		m.message = fmt.Sprintf("Created %s #%d", relType, msg.item.ID)
+		// Refresh related items
+		return m, m.fetchRelatedItems(m.selectedItem.ID)
+
+	case removeLinkMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.message = "Link removed"
+		m.relatedCursor = 0
+		// Refresh related items
+		return m, m.fetchRelatedItems(m.selectedItem.ID)
+
+	case deleteWorkItemMsg:
+		m.loading = false
+		m.deletingWorkItem = false
+		m.deleteConfirmInput = ""
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.message = fmt.Sprintf("Deleted work item #%d", m.deleteWorkItemID)
+		m.cursor = 0
+		return m, m.fetchWorkItems()
 	}
 
 	switch m.view {
@@ -360,9 +431,10 @@ func (m Model) createWorkItem() tea.Cmd {
 				priority = int(p[0] - '0')
 			}
 		}
+		assignedTo := m.createInputs[3].Value()
 		wiType := m.workItemTypes[m.createType]
 
-		item, err := m.client.CreateWorkItem(wiType, title, desc, priority)
+		item, err := m.client.CreateWorkItemWithAssignee(wiType, title, desc, priority, assignedTo)
 		return createResultMsg{item: item, err: err}
 	}
 }
@@ -379,6 +451,26 @@ type addCommentMsg struct {
 type updateWorkItemMsg struct {
 	item *azdo.WorkItem
 	err  error
+}
+
+type relatedItemsMsg struct {
+	parent   *azdo.WorkItem
+	children []azdo.WorkItem
+	err      error
+}
+
+type createRelatedMsg struct {
+	item    *azdo.WorkItem
+	asChild bool
+	err     error
+}
+
+type removeLinkMsg struct {
+	err error
+}
+
+type deleteWorkItemMsg struct {
+	err error
 }
 
 func (m Model) fetchComments(workItemID int) tea.Cmd {
@@ -399,5 +491,47 @@ func (m Model) updateWorkItem(workItemID int, title, state, assignedTo, tags str
 	return func() tea.Msg {
 		item, err := m.client.UpdateWorkItem(workItemID, title, state, assignedTo, tags)
 		return updateWorkItemMsg{item: item, err: err}
+	}
+}
+
+func (m Model) fetchRelatedItems(workItemID int) tea.Cmd {
+	return func() tea.Msg {
+		parent, children, err := m.client.GetRelatedWorkItems(workItemID)
+		return relatedItemsMsg{parent: parent, children: children, err: err}
+	}
+}
+
+func (m Model) createRelatedItem(parentID int, asChild bool, title, wiType, assignee string) tea.Cmd {
+	return func() tea.Msg {
+		var item *azdo.WorkItem
+		var err error
+
+		if asChild {
+			// Create a new work item as a child of the current item
+			item, err = m.client.CreateWorkItemWithParentAndAssignee(wiType, title, "", 2, parentID, assignee)
+		} else {
+			// Create a new work item and make the current item its child
+			item, err = m.client.CreateWorkItemWithAssignee(wiType, title, "", 2, assignee)
+			if err == nil && item != nil {
+				// Link the current item as a child of the new item
+				err = m.client.AddChildLink(item.ID, parentID)
+			}
+		}
+
+		return createRelatedMsg{item: item, asChild: asChild, err: err}
+	}
+}
+
+func (m Model) removeLink(workItemID, targetID int, isParent bool) tea.Cmd {
+	return func() tea.Msg {
+		err := m.client.RemoveHierarchyLink(workItemID, targetID, isParent)
+		return removeLinkMsg{err: err}
+	}
+}
+
+func (m Model) deleteWorkItem(workItemID int) tea.Cmd {
+	return func() tea.Msg {
+		err := m.client.DeleteWorkItem(workItemID)
+		return deleteWorkItemMsg{err: err}
 	}
 }

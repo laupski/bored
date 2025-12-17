@@ -71,7 +71,7 @@ func (m Model) viewCreate() string {
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
-	labels := []string{"Title *", "Description", "Priority (1-4)"}
+	labels := []string{"Title *", "Description", "Priority (1-4)", "Assigned To"}
 
 	for i, label := range labels {
 		style := labelStyle

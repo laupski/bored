@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 type Client struct {
@@ -20,10 +21,17 @@ type Client struct {
 }
 
 type WorkItem struct {
-	ID     int            `json:"id"`
-	Rev    int            `json:"rev"`
-	Fields WorkItemFields `json:"fields"`
-	URL    string         `json:"url"`
+	ID        int                `json:"id"`
+	Rev       int                `json:"rev"`
+	Fields    WorkItemFields     `json:"fields"`
+	URL       string             `json:"url"`
+	Relations []WorkItemRelation `json:"relations,omitempty"`
+}
+
+type WorkItemRelation struct {
+	Rel        string                 `json:"rel"`
+	URL        string                 `json:"url"`
+	Attributes map[string]interface{} `json:"attributes"`
 }
 
 type WorkItemFields struct {
@@ -189,7 +197,7 @@ func (c *Client) getWorkItemsByIDs(ids []string) ([]WorkItem, error) {
 		idsParam += id
 	}
 
-	getURL := fmt.Sprintf("%s/_apis/wit/workitems?ids=%s&api-version=7.0", c.baseURL(), url.QueryEscape(idsParam))
+	getURL := fmt.Sprintf("%s/_apis/wit/workitems?ids=%s&$expand=relations&api-version=7.0", c.baseURL(), url.QueryEscape(idsParam))
 
 	req, err := http.NewRequest("GET", getURL, nil)
 	if err != nil {
@@ -217,6 +225,10 @@ func (c *Client) getWorkItemsByIDs(ids []string) ([]WorkItem, error) {
 }
 
 func (c *Client) CreateWorkItem(workItemType, title, description string, priority int) (*WorkItem, error) {
+	return c.CreateWorkItemWithAssignee(workItemType, title, description, priority, "")
+}
+
+func (c *Client) CreateWorkItemWithAssignee(workItemType, title, description string, priority int, assignedTo string) (*WorkItem, error) {
 	createURL := fmt.Sprintf("%s/_apis/wit/workitems/$%s?api-version=7.0", c.baseURL(), url.PathEscape(workItemType))
 
 	ops := []CreateWorkItemOp{
@@ -230,6 +242,9 @@ func (c *Client) CreateWorkItem(workItemType, title, description string, priorit
 	}
 	if c.AreaPath != "" {
 		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/System.AreaPath", Value: c.AreaPath})
+	}
+	if assignedTo != "" {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/System.AssignedTo", Value: assignedTo})
 	}
 
 	jsonBody, _ := json.Marshal(ops)
@@ -258,6 +273,169 @@ func (c *Client) CreateWorkItem(workItemType, title, description string, priorit
 	}
 
 	return &workItem, nil
+}
+
+// CreateWorkItemWithParent creates a work item with a parent link
+func (c *Client) CreateWorkItemWithParent(workItemType, title, description string, priority int, parentID int) (*WorkItem, error) {
+	return c.CreateWorkItemWithParentAndAssignee(workItemType, title, description, priority, parentID, "")
+}
+
+// CreateWorkItemWithParentAndAssignee creates a work item with a parent link and assignee
+func (c *Client) CreateWorkItemWithParentAndAssignee(workItemType, title, description string, priority int, parentID int, assignedTo string) (*WorkItem, error) {
+	createURL := fmt.Sprintf("%s/_apis/wit/workitems/$%s?api-version=7.0", c.baseURL(), url.PathEscape(workItemType))
+
+	ops := []CreateWorkItemOp{
+		{Op: "add", Path: "/fields/System.Title", Value: title},
+	}
+	if description != "" {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/System.Description", Value: description})
+	}
+	if priority > 0 {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/Microsoft.VSTS.Common.Priority", Value: priority})
+	}
+	if c.AreaPath != "" {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/System.AreaPath", Value: c.AreaPath})
+	}
+	if assignedTo != "" {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/System.AssignedTo", Value: assignedTo})
+	}
+
+	// Add parent link
+	parentURL := fmt.Sprintf("%s/_apis/wit/workItems/%d", c.baseURL(), parentID)
+	ops = append(ops, CreateWorkItemOp{
+		Op:   "add",
+		Path: "/relations/-",
+		Value: map[string]interface{}{
+			"rel": "System.LinkTypes.Hierarchy-Reverse",
+			"url": parentURL,
+		},
+	})
+
+	jsonBody, _ := json.Marshal(ops)
+
+	req, err := http.NewRequest("POST", createURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var workItem WorkItem
+	if err := json.NewDecoder(resp.Body).Decode(&workItem); err != nil {
+		return nil, err
+	}
+
+	return &workItem, nil
+}
+
+// AddChildLink adds a child link from parentID to childID
+func (c *Client) AddChildLink(parentID, childID int) error {
+	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), parentID)
+
+	childURL := fmt.Sprintf("%s/_apis/wit/workItems/%d", c.baseURL(), childID)
+	ops := []CreateWorkItemOp{
+		{
+			Op:   "add",
+			Path: "/relations/-",
+			Value: map[string]interface{}{
+				"rel": "System.LinkTypes.Hierarchy-Forward",
+				"url": childURL,
+			},
+		},
+	}
+
+	jsonBody, _ := json.Marshal(ops)
+
+	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// RemoveRelation removes a relation from a work item by relation index
+func (c *Client) RemoveRelation(workItemID int, relationIndex int) error {
+	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	ops := []CreateWorkItemOp{
+		{
+			Op:   "remove",
+			Path: fmt.Sprintf("/relations/%d", relationIndex),
+		},
+	}
+
+	jsonBody, _ := json.Marshal(ops)
+
+	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// RemoveHierarchyLink removes the parent-child link between two work items
+// If isParent is true, removes the parent link from the current item
+// If isParent is false, removes the child link (current item is parent of targetID)
+func (c *Client) RemoveHierarchyLink(workItemID int, targetID int, isParent bool) error {
+	// Get the work item with relations to find the index
+	wi, err := c.GetWorkItemWithRelations(workItemID)
+	if err != nil {
+		return err
+	}
+
+	targetURL := fmt.Sprintf("workItems/%d", targetID)
+	relType := "System.LinkTypes.Hierarchy-Reverse" // parent link
+	if !isParent {
+		relType = "System.LinkTypes.Hierarchy-Forward" // child link
+	}
+
+	// Find the relation index
+	for i, rel := range wi.Relations {
+		if rel.Rel == relType && strings.Contains(rel.URL, targetURL) {
+			return c.RemoveRelation(workItemID, i)
+		}
+	}
+
+	return fmt.Errorf("relation not found")
 }
 
 func (c *Client) GetWorkItemTypes() ([]string, error) {
@@ -397,6 +575,126 @@ func (c *Client) UpdateWorkItem(workItemID int, title, state, assignedTo, tags s
 	}
 
 	return &workItem, nil
+}
+
+// GetWorkItemWithRelations fetches a single work item with its relations expanded
+func (c *Client) GetWorkItemWithRelations(workItemID int) (*WorkItem, error) {
+	getURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?$expand=relations&api-version=7.0", c.baseURL(), workItemID)
+
+	req, err := http.NewRequest("GET", getURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var workItem WorkItem
+	if err := json.NewDecoder(resp.Body).Decode(&workItem); err != nil {
+		return nil, err
+	}
+
+	return &workItem, nil
+}
+
+// GetRelatedWorkItems fetches parent and child work items for a given work item
+func (c *Client) GetRelatedWorkItems(workItemID int) (parent *WorkItem, children []WorkItem, err error) {
+	// First get the work item with relations
+	wi, err := c.GetWorkItemWithRelations(workItemID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var parentID int
+	var childIDs []string
+
+	// Parse relations to find parent and children
+	// "System.LinkTypes.Hierarchy-Reverse" = parent (this item is a child of the target)
+	// "System.LinkTypes.Hierarchy-Forward" = child (this item is a parent of the target)
+	for _, rel := range wi.Relations {
+		switch rel.Rel {
+		case "System.LinkTypes.Hierarchy-Reverse":
+			// Extract ID from URL: .../workitems/123
+			parentID = extractWorkItemIDFromURL(rel.URL)
+		case "System.LinkTypes.Hierarchy-Forward":
+			childID := extractWorkItemIDFromURL(rel.URL)
+			if childID > 0 {
+				childIDs = append(childIDs, fmt.Sprintf("%d", childID))
+			}
+		}
+	}
+
+	// Fetch parent if exists
+	if parentID > 0 {
+		parent, err = c.GetWorkItemWithRelations(parentID)
+		if err != nil {
+			// Don't fail if we can't get parent, just log it
+			parent = nil
+		}
+	}
+
+	// Fetch children if exist
+	if len(childIDs) > 0 {
+		children, err = c.getWorkItemsByIDs(childIDs)
+		if err != nil {
+			// Don't fail if we can't get children
+			children = nil
+		}
+	}
+
+	return parent, children, nil
+}
+
+// extractWorkItemIDFromURL extracts the work item ID from a URL like
+// https://dev.azure.com/org/project/_apis/wit/workItems/123
+func extractWorkItemIDFromURL(urlStr string) int {
+	// Parse the URL and get the last path segment
+	var id int
+	fmt.Sscanf(urlStr[len(urlStr)-10:], "%d", &id)
+	if id > 0 {
+		return id
+	}
+	// Try parsing from the end more carefully
+	for i := len(urlStr) - 1; i >= 0; i-- {
+		if urlStr[i] == '/' {
+			fmt.Sscanf(urlStr[i+1:], "%d", &id)
+			return id
+		}
+	}
+	return 0
+}
+
+// DeleteWorkItem deletes a work item by ID
+func (c *Client) DeleteWorkItem(workItemID int) error {
+	deleteURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	req, err := http.NewRequest("DELETE", deleteURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
 }
 
 func (c *Client) TestConnection() error {

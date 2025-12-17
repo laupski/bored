@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bored/azdo"
 	"fmt"
 	"strings"
 	"time"
@@ -12,20 +13,99 @@ import (
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle create related mode input
+		if m.creatingRelated {
+			switch msg.String() {
+			case "esc":
+				m.creatingRelated = false
+				m.createRelatedTitle = ""
+				return m, nil
+			case "enter":
+				if m.createRelatedTitle != "" {
+					wiType := "Task"
+					if m.createRelatedType < len(m.workItemTypes) {
+						wiType = m.workItemTypes[m.createRelatedType]
+					}
+					m.loading = true
+					m.creatingRelated = false
+					return m, m.createRelatedItem(m.selectedItem.ID, m.createRelatedAsChild, m.createRelatedTitle, wiType, m.createRelatedAssignee)
+				}
+				return m, nil
+			case "tab":
+				// Toggle between title and assignee fields
+				m.createRelatedFocus = (m.createRelatedFocus + 1) % 2
+				return m, nil
+			case "left":
+				if m.createRelatedType > 0 {
+					m.createRelatedType--
+				} else {
+					m.createRelatedType = len(m.workItemTypes) - 1
+				}
+				return m, nil
+			case "right":
+				m.createRelatedType = (m.createRelatedType + 1) % len(m.workItemTypes)
+				return m, nil
+			case "backspace":
+				if m.createRelatedFocus == 0 && len(m.createRelatedTitle) > 0 {
+					m.createRelatedTitle = m.createRelatedTitle[:len(m.createRelatedTitle)-1]
+				} else if m.createRelatedFocus == 1 && len(m.createRelatedAssignee) > 0 {
+					m.createRelatedAssignee = m.createRelatedAssignee[:len(m.createRelatedAssignee)-1]
+				}
+				return m, nil
+			default:
+				// Add character to the focused field
+				if len(msg.String()) == 1 {
+					if m.createRelatedFocus == 0 {
+						m.createRelatedTitle += msg.String()
+					} else {
+						m.createRelatedAssignee += msg.String()
+					}
+				} else if msg.String() == "space" {
+					if m.createRelatedFocus == 0 {
+						m.createRelatedTitle += " "
+					} else {
+						m.createRelatedAssignee += " "
+					}
+				}
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "tab", "down":
-			if !m.commentsExpanded {
+			if !m.commentsExpanded && !m.relatedExpanded {
 				m.detailFocus = (m.detailFocus + 1) % len(m.detailInputs)
 				return m, m.updateDetailFocus()
+			} else if m.relatedExpanded {
+				// Navigate through related items
+				maxCursor := len(m.childItems)
+				if m.parentItem != nil {
+					maxCursor++ // Account for parent
+				}
+				if maxCursor > 0 {
+					m.relatedCursor = (m.relatedCursor + 1) % maxCursor
+				}
 			}
 			return m, nil
 		case "shift+tab", "up":
-			if !m.commentsExpanded {
+			if !m.commentsExpanded && !m.relatedExpanded {
 				m.detailFocus--
 				if m.detailFocus < 0 {
 					m.detailFocus = len(m.detailInputs) - 1
 				}
 				return m, m.updateDetailFocus()
+			} else if m.relatedExpanded {
+				// Navigate through related items
+				maxCursor := len(m.childItems)
+				if m.parentItem != nil {
+					maxCursor++ // Account for parent
+				}
+				if maxCursor > 0 {
+					m.relatedCursor--
+					if m.relatedCursor < 0 {
+						m.relatedCursor = maxCursor - 1
+					}
+				}
 			}
 			return m, nil
 		case "ctrl+s":
@@ -37,10 +117,74 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loading = true
 			return m, m.updateWorkItem(m.selectedItem.ID, title, state, assignedTo, tags)
 		case "enter":
+			// If related items expanded, navigate to selected item
+			if m.relatedExpanded {
+				var targetItem *azdo.WorkItem
+				if m.parentItem != nil {
+					if m.relatedCursor == 0 {
+						targetItem = m.parentItem
+					} else if m.relatedCursor-1 < len(m.childItems) {
+						targetItem = &m.childItems[m.relatedCursor-1]
+					}
+				} else if m.relatedCursor < len(m.childItems) {
+					targetItem = &m.childItems[m.relatedCursor]
+				}
+				if targetItem != nil {
+					return m.navigateToWorkItem(targetItem)
+				}
+				return m, nil
+			}
 			// If on comment field and there's text, add the comment
 			if m.detailFocus == 4 && m.detailInputs[4].Value() != "" {
 				m.loading = true
 				return m, m.addComment(m.selectedItem.ID, m.detailInputs[4].Value())
+			}
+			return m, nil
+		case "ctrl+r":
+			// Toggle related items expanded/collapsed
+			m.relatedExpanded = !m.relatedExpanded
+			m.relatedCursor = 0
+			return m, nil
+		case "d", "delete":
+			// Remove the selected link when in related items view
+			if m.relatedExpanded && !m.creatingRelated && !m.confirmingDelete {
+				var targetID int
+				var isParent bool
+				if m.parentItem != nil {
+					if m.relatedCursor == 0 {
+						// Removing parent link
+						targetID = m.parentItem.ID
+						isParent = true
+					} else if m.relatedCursor-1 < len(m.childItems) {
+						// Removing child link
+						targetID = m.childItems[m.relatedCursor-1].ID
+						isParent = false
+					}
+				} else if m.relatedCursor < len(m.childItems) {
+					// No parent, removing child link
+					targetID = m.childItems[m.relatedCursor].ID
+					isParent = false
+				}
+				if targetID > 0 {
+					// Start confirmation
+					m.confirmingDelete = true
+					m.confirmDeleteTargetID = targetID
+					m.confirmDeleteIsParent = isParent
+				}
+			}
+			return m, nil
+		case "y":
+			// Confirm delete
+			if m.confirmingDelete {
+				m.loading = true
+				m.confirmingDelete = false
+				return m, m.removeLink(m.selectedItem.ID, m.confirmDeleteTargetID, m.confirmDeleteIsParent)
+			}
+			return m, nil
+		case "n":
+			// Cancel delete confirmation
+			if m.confirmingDelete {
+				m.confirmingDelete = false
 			}
 			return m, nil
 		case "ctrl+e":
@@ -49,15 +193,31 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commentScroll = 0
 			return m, nil
 		case "ctrl+n":
-			// Scroll comments down when expanded
+			// Scroll comments down when expanded, or create child when in related mode
 			if m.commentsExpanded && m.commentScroll < len(m.comments)-1 {
 				m.commentScroll++
+			} else if m.relatedExpanded && !m.creatingRelated {
+				// Start creating a child item
+				m.creatingRelated = true
+				m.createRelatedAsChild = true
+				m.createRelatedTitle = ""
+				m.createRelatedType = 0
+				m.createRelatedAssignee = m.username
+				m.createRelatedFocus = 0
 			}
 			return m, nil
 		case "ctrl+p":
-			// Scroll comments up when expanded
+			// Scroll comments up when expanded, or create parent when in related mode
 			if m.commentsExpanded && m.commentScroll > 0 {
 				m.commentScroll--
+			} else if m.relatedExpanded && !m.creatingRelated {
+				// Start creating a parent item
+				m.creatingRelated = true
+				m.createRelatedAsChild = false
+				m.createRelatedTitle = ""
+				m.createRelatedType = 0
+				m.createRelatedAssignee = m.username
+				m.createRelatedFocus = 0
 			}
 			return m, nil
 		}
@@ -88,6 +248,33 @@ func (m *Model) updateDetailInputs(msg tea.Msg) tea.Cmd {
 		m.detailInputs[i], cmds[i] = m.detailInputs[i].Update(msg)
 	}
 	return tea.Batch(cmds...)
+}
+
+// navigateToWorkItem switches the detail view to a different work item
+func (m Model) navigateToWorkItem(wi *azdo.WorkItem) (tea.Model, tea.Cmd) {
+	m.selectedItem = wi
+	m.detailInputs[0].SetValue(wi.Fields.Title)
+	m.detailInputs[1].SetValue(wi.Fields.State)
+	if wi.Fields.AssignedTo != nil {
+		m.detailInputs[2].SetValue(wi.Fields.AssignedTo.UniqueName)
+	} else {
+		m.detailInputs[2].SetValue("")
+	}
+	m.detailInputs[3].SetValue(wi.Fields.Tags)
+	m.detailInputs[4].SetValue("")
+	m.comments = nil
+	m.parentItem = nil
+	m.childItems = nil
+	m.relatedExpanded = false
+	m.relatedCursor = 0
+	m.commentsExpanded = false
+	m.commentScroll = 0
+	m.detailFocus = 0
+	m.err = nil
+	m.message = ""
+
+	// Fetch comments and related items for the new work item
+	return m, tea.Batch(m.fetchComments(wi.ID), m.fetchRelatedItems(wi.ID))
 }
 
 func (m Model) viewDetail() string {
@@ -140,6 +327,112 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n")
 	b.WriteString(detailStyle.Render(fmt.Sprintf("Type: %s", wi.Fields.WorkItemType)))
 	b.WriteString("\n\n")
+
+	// Related items section (parent/children)
+	relatedHeaderStyle := labelStyle.Copy()
+	if m.relatedExpanded {
+		relatedHeaderStyle = relatedHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
+	}
+
+	relatedCount := len(m.childItems)
+	if m.parentItem != nil {
+		relatedCount++
+	}
+
+	if m.relatedExpanded {
+		b.WriteString(relatedHeaderStyle.Render(fmt.Sprintf("▼ Related Items (%d)", relatedCount)))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+r: collapse, ↑↓: select, enter: open)"))
+	} else {
+		b.WriteString(labelStyle.Render(fmt.Sprintf("▶ Related Items (%d)", relatedCount)))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+r: expand)"))
+	}
+	b.WriteString("\n")
+
+	if relatedCount == 0 {
+		b.WriteString(detailStyle.Render("No parent or child items"))
+		b.WriteString("\n")
+	} else if !m.relatedExpanded {
+		// Collapsed: show summary
+		var summaryParts []string
+		if m.parentItem != nil {
+			summaryParts = append(summaryParts, fmt.Sprintf("Parent: %s #%d", m.parentItem.Fields.WorkItemType, m.parentItem.ID))
+		}
+		if len(m.childItems) > 0 {
+			summaryParts = append(summaryParts, fmt.Sprintf("%d children", len(m.childItems)))
+		}
+		b.WriteString(detailStyle.Render(strings.Join(summaryParts, " • ")))
+		b.WriteString("\n")
+	} else {
+		// Expanded: show all related items
+		relatedItemStyle := lipgloss.NewStyle().
+			Padding(0, 1)
+		selectedRelatedStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("229")).
+			Background(lipgloss.Color("57")).
+			Padding(0, 1)
+
+		cursorIdx := 0
+		if m.parentItem != nil {
+			style := relatedItemStyle
+			if m.relatedCursor == cursorIdx {
+				style = selectedRelatedStyle
+			}
+			parentInfo := fmt.Sprintf("⬆ Parent: %s #%d - %s [%s]",
+				m.parentItem.Fields.WorkItemType,
+				m.parentItem.ID,
+				truncateString(m.parentItem.Fields.Title, 40),
+				m.parentItem.Fields.State)
+			b.WriteString(style.Render(parentInfo))
+			b.WriteString("\n")
+			cursorIdx++
+		}
+
+		for i, child := range m.childItems {
+			style := relatedItemStyle
+			if m.relatedCursor == cursorIdx+i {
+				style = selectedRelatedStyle
+			}
+			childInfo := fmt.Sprintf("⬇ Child: %s #%d - %s [%s]",
+				child.Fields.WorkItemType,
+				child.ID,
+				truncateString(child.Fields.Title, 40),
+				child.Fields.State)
+			b.WriteString(style.Render(childInfo))
+			b.WriteString("\n")
+		}
+
+		// Show create related form if active
+		if m.creatingRelated {
+			b.WriteString("\n")
+			createFormStyle := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("39")).
+				Padding(0, 1)
+			relationType := "Child"
+			if !m.createRelatedAsChild {
+				relationType = "Parent"
+			}
+			wiType := "Task"
+			if m.createRelatedType < len(m.workItemTypes) {
+				wiType = m.workItemTypes[m.createRelatedType]
+			}
+			// Show cursor indicator on focused field
+			titleCursor := ""
+			assigneeCursor := ""
+			if m.createRelatedFocus == 0 {
+				titleCursor = "_"
+			} else {
+				assigneeCursor = "_"
+			}
+			formContent := fmt.Sprintf("Create New %s (%s)\nTitle: %s%s\nAssigned To: %s%s\n\n←/→: change type • tab: switch field",
+				relationType, wiType, m.createRelatedTitle, titleCursor, m.createRelatedAssignee, assigneeCursor)
+			b.WriteString(createFormStyle.Render(formContent))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
 
 	// Comments section
 	commentHeaderStyle := labelStyle.Copy()
@@ -232,9 +525,29 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n")
 	if m.commentsExpanded {
 		b.WriteString(helpStyle.Render("ctrl+e: collapse comments • ctrl+n/p: scroll • esc: back"))
+	} else if m.creatingRelated {
+		b.WriteString(helpStyle.Render("type title • ←/→: change type • enter: create • esc: cancel"))
+	} else if m.confirmingDelete {
+		confirmStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true)
+		b.WriteString(confirmStyle.Render(fmt.Sprintf("Remove link to #%d? (y/n)", m.confirmDeleteTargetID)))
+	} else if m.relatedExpanded {
+		b.WriteString(helpStyle.Render("ctrl+r: collapse • ctrl+n: new child • ctrl+p: new parent • d: remove link • ↑↓: select • enter: open • esc: back"))
 	} else {
-		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • enter: add comment • ctrl+e: view comments • esc: back"))
+		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • enter: add comment • ctrl+e: comments • ctrl+r: related • esc: back"))
 	}
 
 	return boxStyle.Render(b.String())
+}
+
+// truncateString truncates a string to the specified length, adding "..." if truncated
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }
