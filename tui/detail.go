@@ -264,7 +264,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.relatedCursor = 0
 			return m, nil
 		case "d", "delete":
-			// Remove the selected link when in related items view
+			// Remove the selected link when in related items view (only when related is expanded, otherwise let "d" pass through to input)
 			if m.relatedExpanded && !m.creatingRelated && !m.confirmingDelete {
 				var targetID int
 				var isParent bool
@@ -289,22 +289,21 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.confirmDeleteTargetID = targetID
 					m.confirmDeleteIsParent = isParent
 				}
+				return m, nil
 			}
-			return m, nil
 		case "y":
-			// Confirm delete
+			// Confirm delete (only when confirming)
 			if m.confirmingDelete {
 				m.loading = true
 				m.confirmingDelete = false
 				return m, m.removeLink(m.selectedItem.ID, m.confirmDeleteTargetID, m.confirmDeleteIsParent)
 			}
-			return m, nil
 		case "n":
-			// Cancel delete confirmation
+			// Cancel delete confirmation (only when confirming, otherwise let "n" pass through to input)
 			if m.confirmingDelete {
 				m.confirmingDelete = false
+				return m, nil
 			}
-			return m, nil
 		case "ctrl+e":
 			// Toggle comments expanded/collapsed
 			m.commentsExpanded = !m.commentsExpanded
