@@ -14,6 +14,9 @@ import (
 func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Clear notification message on any key press
+		m.notifyMessage = ""
+
 		// Handle delete confirmation mode
 		if m.deletingWorkItem {
 			switch msg.String() {
@@ -338,6 +341,15 @@ func (m Model) viewBoard() string {
 	if m.message != "" {
 		b.WriteString("\n")
 		b.WriteString(successStyle.Render(m.message))
+	}
+
+	// Show notification message if present
+	if m.notifyMessage != "" {
+		b.WriteString("\n")
+		notifyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226")).
+			Bold(true)
+		b.WriteString(notifyStyle.Render(m.notifyMessage))
 	}
 
 	b.WriteString("\n")

@@ -17,7 +17,8 @@ import (
 // AppConfig represents the application configuration stored in a file
 type AppConfig struct {
 	// General settings
-	DefaultShowAll bool `toml:"default_show_all"` // Default value for "show all" toggle on board
+	DefaultShowAll      bool `toml:"default_show_all"`     // Default value for "show all" toggle on board
+	EnableNotifications bool `toml:"enable_notifications"` // Enable sound notifications for work item changes
 
 	// Display settings
 	MaxWorkItems int `toml:"max_work_items"` // Maximum work items to fetch (default 50)
@@ -26,8 +27,9 @@ type AppConfig struct {
 // DefaultConfig returns a new AppConfig with default values
 func DefaultConfig() AppConfig {
 	return AppConfig{
-		DefaultShowAll: false,
-		MaxWorkItems:   50,
+		DefaultShowAll:      false,
+		EnableNotifications: true, // Enable by default
+		MaxWorkItems:        50,
 	}
 }
 
@@ -160,18 +162,22 @@ func (m Model) updateConfigFile(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appConfigMessage = ""
 			return m, nil
 		case "tab", "down":
-			m.configFileFocus = (m.configFileFocus + 1) % 2
+			m.configFileFocus = (m.configFileFocus + 1) % 3
 			return m, m.updateConfigFileFocus()
 		case "shift+tab", "up":
 			m.configFileFocus--
 			if m.configFileFocus < 0 {
-				m.configFileFocus = 1
+				m.configFileFocus = 2
 			}
 			return m, m.updateConfigFileFocus()
 		case "enter", " ":
 			// Toggle boolean options
 			if m.configFileFocus == 0 { // DefaultShowAll
 				m.appConfig.DefaultShowAll = !m.appConfig.DefaultShowAll
+				return m, nil
+			}
+			if m.configFileFocus == 1 { // EnableNotifications
+				m.appConfig.EnableNotifications = !m.appConfig.EnableNotifications
 				return m, nil
 			}
 		case "ctrl+s":
@@ -181,7 +187,7 @@ func (m Model) updateConfigFile(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle text input for MaxWorkItems field
-	if m.configFileFocus == 1 {
+	if m.configFileFocus == 2 {
 		cmd := m.updateConfigFileInputs(msg)
 		return m, cmd
 	}
@@ -191,7 +197,7 @@ func (m Model) updateConfigFile(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateConfigFileFocus updates focus state for config file inputs
 func (m *Model) updateConfigFileFocus() tea.Cmd {
-	if m.configFileFocus == 1 { // MaxWorkItems
+	if m.configFileFocus == 2 { // MaxWorkItems
 		return m.configFileInputs[0].Focus()
 	}
 	m.configFileInputs[0].Blur()
@@ -247,6 +253,7 @@ func (m Model) viewConfigFile() string {
 		description string
 	}{
 		{"Default Show All", "Show all work items by default (not just yours)"},
+		{"Enable Notifications", "Play sound when assigned work items change"},
 		{"Max Work Items", "Maximum number of work items to fetch"},
 	}
 
@@ -271,7 +278,17 @@ func (m Model) viewConfigFile() string {
 			} else {
 				b.WriteString(normalStyle.Render(checkbox))
 			}
-		case 1: // MaxWorkItems (text input)
+		case 1: // EnableNotifications (checkbox)
+			checkbox := "[ ]"
+			if m.appConfig.EnableNotifications {
+				checkbox = "[x]"
+			}
+			if i == m.configFileFocus {
+				b.WriteString(selectedStyle.Render(checkbox))
+			} else {
+				b.WriteString(normalStyle.Render(checkbox))
+			}
+		case 2: // MaxWorkItems (text input)
 			b.WriteString(m.configFileInputs[0].View())
 		}
 

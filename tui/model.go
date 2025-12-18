@@ -3,11 +3,17 @@ package tui
 import (
 	"bored/azdo"
 	"fmt"
+	"os/exec"
+	"runtime"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// NotificationCheckInterval is how often to check for work item changes
+const NotificationCheckInterval = 30 * time.Second
 
 type View int
 
@@ -84,6 +90,20 @@ type Model struct {
 	planningFocus    int                  // current field focus index
 	planningInputs   []textinput.Model    // text inputs for planning fields
 	planningFields   []azdo.PlanningField // available planning fields for current work item type
+	// Notification state
+	notificationsEnabled bool        // true when change notifications are active
+	knownRevisions       map[int]int // map of work item ID to last known revision
+	lastNotifyCheck      time.Time   // last time we checked for changes
+	notifyMessage        string      // message to display when changes detected
+}
+
+// tickMsg is sent periodically to check for work item changes
+type tickMsg time.Time
+
+// notifyChangesMsg is sent when work item changes are detected
+type notifyChangesMsg struct {
+	changedItems []azdo.WorkItem
+	err          error
 }
 
 var (
@@ -331,8 +351,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.view = ViewBoard
-		// Fetch work items and work item types in parallel
-		return m, tea.Batch(m.fetchWorkItems(), m.fetchWorkItemTypes())
+		// Initialize notification tracking based on config setting
+		m.notificationsEnabled = m.appConfig.EnableNotifications
+		m.knownRevisions = make(map[int]int)
+		m.lastNotifyCheck = time.Now()
+		// Fetch work items and work item types in parallel, and start notification ticker if enabled
+		cmds := []tea.Cmd{m.fetchWorkItems(), m.fetchWorkItemTypes()}
+		if m.notificationsEnabled {
+			cmds = append(cmds, m.startNotificationTicker())
+		}
+		return m, tea.Batch(cmds...)
+
+	case tickMsg:
+		// Only check for changes if notifications are enabled and not on config screen
+		if m.notificationsEnabled && m.view != ViewConfig && m.view != ViewConfigFile && m.client != nil && m.username != "" {
+			return m, m.checkForChanges()
+		}
+		// Continue ticking even if we skip this check
+		return m, m.startNotificationTicker()
+
+	case notifyChangesMsg:
+		if msg.err == nil && len(msg.changedItems) > 0 {
+			// Play notification sound
+			playNotificationSound()
+			// Build notification message
+			if len(msg.changedItems) == 1 {
+				m.notifyMessage = fmt.Sprintf("🔔 Work item #%d changed: %s", msg.changedItems[0].ID, msg.changedItems[0].Fields.Title)
+			} else {
+				m.notifyMessage = fmt.Sprintf("🔔 %d work items changed", len(msg.changedItems))
+			}
+			// Update known revisions
+			for _, item := range msg.changedItems {
+				m.knownRevisions[item.ID] = item.Rev
+			}
+		}
+		// Continue ticking
+		return m, m.startNotificationTicker()
 
 	case workItemTypesMsg:
 		if msg.err == nil && len(msg.types) > 0 {
@@ -366,6 +420,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.err = nil
 		m.message = ""
+		// Seed known revisions to prevent false positives on initial load
+		if m.knownRevisions != nil {
+			for _, item := range msg.items {
+				if _, exists := m.knownRevisions[item.ID]; !exists {
+					m.knownRevisions[item.ID] = item.Rev
+				}
+			}
+		}
 		return m, nil
 
 	case createResultMsg:
@@ -792,4 +854,65 @@ func (m *Model) updatePlanningInputsFromWorkItemDynamic() {
 			m.planningInputs[i].SetValue("")
 		}
 	}
+}
+
+// startNotificationTicker returns a command that sends a tickMsg after the notification interval
+func (m Model) startNotificationTicker() tea.Cmd {
+	return tea.Tick(NotificationCheckInterval, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// checkForChanges fetches recently changed work items and compares against known revisions
+func (m Model) checkForChanges() tea.Cmd {
+	return func() tea.Msg {
+		// Fetch work items assigned to user that changed in the last 2 minutes
+		// (slightly longer than our check interval to catch any changes)
+		items, err := m.client.GetRecentlyChangedWorkItems(m.username, 2)
+		if err != nil {
+			return notifyChangesMsg{err: err}
+		}
+
+		// Find items that have changed or are newly assigned since we last checked
+		var changedItems []azdo.WorkItem
+		for _, item := range items {
+			if knownRev, exists := m.knownRevisions[item.ID]; exists {
+				// Item exists in our cache - check if revision changed
+				if item.Rev > knownRev {
+					changedItems = append(changedItems, item)
+				}
+			} else {
+				// New item we haven't seen before
+				// Only notify if we have already seeded the cache (not first load)
+				// and the item was recently changed (within our check window)
+				if len(m.knownRevisions) > 0 {
+					changedItems = append(changedItems, item)
+				}
+			}
+		}
+
+		return notifyChangesMsg{changedItems: changedItems, err: nil}
+	}
+}
+
+// playNotificationSound plays a system notification sound
+func playNotificationSound() {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS: use afplay with system sound
+		cmd = exec.Command("afplay", "/System/Library/Sounds/Ping.aiff")
+	case "linux":
+		// Linux: try paplay (PulseAudio) with freedesktop sound
+		cmd = exec.Command("paplay", "/usr/share/sounds/freedesktop/stereo/message.oga")
+	case "windows":
+		// Windows: use PowerShell to play system sound
+		cmd = exec.Command("powershell", "-c", "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync()")
+	default:
+		// Fallback: print bell character to terminal
+		fmt.Print("\a")
+		return
+	}
+	// Run in background, ignore errors (sound is optional)
+	_ = cmd.Start()
 }

@@ -976,6 +976,64 @@ func (c *Client) UpdateWorkItemPlanningDynamic(workItemID int, fields map[string
 	return &workItem, nil
 }
 
+// GetRecentlyChangedWorkItems fetches work items assigned to a user that changed within the last N minutes
+// Excludes changes made by the user themselves (only notifies on changes by others)
+func (c *Client) GetRecentlyChangedWorkItems(assignedTo string, withinMinutes int) ([]WorkItem, error) {
+	if assignedTo == "" {
+		return []WorkItem{}, nil
+	}
+
+	// Build WIQL query for recently changed items assigned to user
+	// Exclude items where the user themselves made the change
+	query := fmt.Sprintf("SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '%s'", c.Project)
+	query += fmt.Sprintf(" AND [System.AssignedTo] = '%s'", assignedTo)
+	query += fmt.Sprintf(" AND [System.ChangedBy] <> '%s'", assignedTo)
+	query += fmt.Sprintf(" AND [System.ChangedDate] >= @Today - %d", withinMinutes)
+	if c.AreaPath != "" {
+		query += fmt.Sprintf(" AND [System.AreaPath] UNDER '%s'", c.AreaPath)
+	}
+	query += " ORDER BY [System.ChangedDate] DESC"
+
+	wiqlURL := fmt.Sprintf("%s/_apis/wit/wiql?api-version=7.0", c.teamURL())
+
+	body := map[string]string{"query": query}
+	jsonBody, _ := json.Marshal(body)
+
+	req, err := http.NewRequest("POST", wiqlURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var queryResult WorkItemQueryResult
+	if err := json.NewDecoder(resp.Body).Decode(&queryResult); err != nil {
+		return nil, err
+	}
+
+	if len(queryResult.WorkItems) == 0 {
+		return []WorkItem{}, nil
+	}
+
+	ids := make([]string, len(queryResult.WorkItems))
+	for i, wi := range queryResult.WorkItems {
+		ids[i] = fmt.Sprintf("%d", wi.ID)
+	}
+
+	return c.getWorkItemsByIDs(ids)
+}
+
 // UpdateWorkItemIteration updates the iteration path of a work item
 func (c *Client) UpdateWorkItemIteration(workItemID int, iterationPath string) (*WorkItem, error) {
 	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
