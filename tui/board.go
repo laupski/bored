@@ -131,6 +131,10 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.childItems = nil
 				m.relatedExpanded = false
 				m.relatedCursor = 0
+				m.commentsExpanded = false
+				m.commentScroll = 0
+				m.iterationExpanded = false
+				m.iterationCursor = 0
 				m.err = nil
 				m.message = ""
 				return m, tea.Batch(m.fetchComments(wi.ID), m.fetchRelatedItems(wi.ID))

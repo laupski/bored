@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bored/azdo"
 	"strings"
 	"testing"
 )
@@ -241,5 +242,102 @@ func TestTruncateString(t *testing.T) {
 				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxLen, result, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetIterationDisplayOrder(t *testing.T) {
+	tests := []struct {
+		name            string
+		iterations      []azdo.Iteration
+		currentPath     string
+		wantFirstName   string
+		wantOrderLength int
+	}{
+		{
+			name:            "empty iterations",
+			iterations:      []azdo.Iteration{},
+			currentPath:     "Project\\Sprint 1",
+			wantFirstName:   "",
+			wantOrderLength: 0,
+		},
+		{
+			name: "current iteration first",
+			iterations: []azdo.Iteration{
+				{ID: "1", Name: "Sprint 1", Path: "Project\\Sprint 1"},
+				{ID: "2", Name: "Sprint 2", Path: "Project\\Sprint 2"},
+				{ID: "3", Name: "Sprint 3", Path: "Project\\Sprint 3"},
+			},
+			currentPath:     "Project\\Sprint 2",
+			wantFirstName:   "Sprint 2",
+			wantOrderLength: 3,
+		},
+		{
+			name: "current iteration already first",
+			iterations: []azdo.Iteration{
+				{ID: "1", Name: "Sprint 1", Path: "Project\\Sprint 1"},
+				{ID: "2", Name: "Sprint 2", Path: "Project\\Sprint 2"},
+			},
+			currentPath:     "Project\\Sprint 1",
+			wantFirstName:   "Sprint 1",
+			wantOrderLength: 2,
+		},
+		{
+			name: "current iteration not found",
+			iterations: []azdo.Iteration{
+				{ID: "1", Name: "Sprint 1", Path: "Project\\Sprint 1"},
+				{ID: "2", Name: "Sprint 2", Path: "Project\\Sprint 2"},
+			},
+			currentPath:     "Project\\Sprint 99",
+			wantFirstName:   "Sprint 1",
+			wantOrderLength: 2,
+		},
+		{
+			name: "single iteration",
+			iterations: []azdo.Iteration{
+				{ID: "1", Name: "Only Sprint", Path: "Project\\Only Sprint"},
+			},
+			currentPath:     "Project\\Only Sprint",
+			wantFirstName:   "Only Sprint",
+			wantOrderLength: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := Model{
+				iterations: tt.iterations,
+				selectedItem: &azdo.WorkItem{
+					Fields: azdo.WorkItemFields{
+						IterationPath: tt.currentPath,
+					},
+				},
+			}
+
+			result := m.getIterationDisplayOrder()
+
+			if len(result) != tt.wantOrderLength {
+				t.Errorf("getIterationDisplayOrder() length = %d, want %d", len(result), tt.wantOrderLength)
+			}
+
+			if tt.wantOrderLength > 0 && result[0].Name != tt.wantFirstName {
+				t.Errorf("getIterationDisplayOrder() first item = %q, want %q", result[0].Name, tt.wantFirstName)
+			}
+		})
+	}
+}
+
+func TestGetIterationDisplayOrderNilSelectedItem(t *testing.T) {
+	m := Model{
+		iterations: []azdo.Iteration{
+			{ID: "1", Name: "Sprint 1", Path: "Project\\Sprint 1"},
+		},
+		selectedItem: nil,
+	}
+
+	result := m.getIterationDisplayOrder()
+
+	// Should return original iterations when selectedItem is nil
+	if len(result) != 1 {
+		t.Errorf("getIterationDisplayOrder() with nil selectedItem should return original iterations, got length %d", len(result))
 	}
 }

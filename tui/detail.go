@@ -149,8 +149,12 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "enter":
 				if m.iterationCursor < len(m.iterations) {
-					m.loading = true
-					return m, m.updateIteration(m.selectedItem.ID, m.iterations[m.iterationCursor].Path)
+					// Get iteration path from reordered display list
+					displayOrder := m.getIterationDisplayOrder()
+					if m.iterationCursor < len(displayOrder) {
+						m.loading = true
+						return m, m.updateIteration(m.selectedItem.ID, displayOrder[m.iterationCursor].Path)
+					}
 				}
 				return m, nil
 			}
@@ -288,6 +292,11 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle related items expanded/collapsed
 			m.relatedExpanded = !m.relatedExpanded
 			m.relatedCursor = 0
+			// Auto-collapse other sections
+			if m.relatedExpanded {
+				m.commentsExpanded = false
+				m.iterationExpanded = false
+			}
 			return m, nil
 		case "d", "delete":
 			// Remove the selected link when in related items view (only when related is expanded, otherwise let "d" pass through to input)
@@ -334,6 +343,11 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle comments expanded/collapsed
 			m.commentsExpanded = !m.commentsExpanded
 			m.commentScroll = 0
+			// Auto-collapse other sections
+			if m.commentsExpanded {
+				m.relatedExpanded = false
+				m.iterationExpanded = false
+			}
 			return m, nil
 		case "ctrl+n":
 			// Scroll comments down when expanded, or create child when in related mode
@@ -368,6 +382,9 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.iterationExpanded {
 				m.iterationExpanded = true
 				m.iterationCursor = 0
+				// Auto-collapse other sections
+				m.commentsExpanded = false
+				m.relatedExpanded = false
 				// Find current iteration in list to set cursor
 				for i, iter := range m.iterations {
 					if iter.Path == m.selectedItem.Fields.IterationPath {
@@ -530,9 +547,10 @@ func (m Model) viewDetail() string {
 			b.WriteString(detailStyle.Render("Loading iterations..."))
 			b.WriteString("\n")
 		} else {
-			for i, iter := range m.iterations {
+			displayOrder := m.getIterationDisplayOrder()
+			for displayIdx, iter := range displayOrder {
 				style := iterItemStyle
-				if m.iterationCursor == i {
+				if m.iterationCursor == displayIdx {
 					style = selectedIterStyle
 				}
 				// Mark current iteration
@@ -779,4 +797,38 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// getIterationDisplayOrder returns iterations with current iteration first
+func (m Model) getIterationDisplayOrder() []azdo.Iteration {
+	if len(m.iterations) == 0 || m.selectedItem == nil {
+		return m.iterations
+	}
+
+	currentPath := m.selectedItem.Fields.IterationPath
+	var currentIdx = -1
+
+	// Find current iteration index
+	for i, iter := range m.iterations {
+		if iter.Path == currentPath {
+			currentIdx = i
+			break
+		}
+	}
+
+	// If current iteration not found, return original order
+	if currentIdx < 0 {
+		return m.iterations
+	}
+
+	// Build reordered list with current first
+	result := make([]azdo.Iteration, 0, len(m.iterations))
+	result = append(result, m.iterations[currentIdx])
+	for i, iter := range m.iterations {
+		if i != currentIdx {
+			result = append(result, iter)
+		}
+	}
+
+	return result
 }

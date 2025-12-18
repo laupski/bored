@@ -258,3 +258,116 @@ func TestCreateWorkItemOpMarshaling(t *testing.T) {
 		t.Errorf("Path = %v, want %v", parsed[0].Path, "/fields/System.Title")
 	}
 }
+
+func TestIterationParsing(t *testing.T) {
+	// Test JSON unmarshaling of iteration
+	jsonData := `{
+		"id": "abc123-def456",
+		"name": "Sprint 1",
+		"path": "Project\\Sprint 1",
+		"attributes": {
+			"startDate": "2024-01-01T00:00:00Z",
+			"finishDate": "2024-01-14T00:00:00Z",
+			"timeFrame": "current"
+		}
+	}`
+
+	var iter Iteration
+	err := json.Unmarshal([]byte(jsonData), &iter)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if iter.ID != "abc123-def456" {
+		t.Errorf("ID = %v, want %v", iter.ID, "abc123-def456")
+	}
+	if iter.Name != "Sprint 1" {
+		t.Errorf("Name = %v, want %v", iter.Name, "Sprint 1")
+	}
+	if iter.Path != "Project\\Sprint 1" {
+		t.Errorf("Path = %v, want %v", iter.Path, "Project\\Sprint 1")
+	}
+	if iter.Attributes == nil {
+		t.Error("Attributes should not be nil")
+	} else {
+		if iter.Attributes.TimeFrame != "current" {
+			t.Errorf("TimeFrame = %v, want %v", iter.Attributes.TimeFrame, "current")
+		}
+		if iter.Attributes.StartDate != "2024-01-01T00:00:00Z" {
+			t.Errorf("StartDate = %v, want %v", iter.Attributes.StartDate, "2024-01-01T00:00:00Z")
+		}
+	}
+}
+
+func TestIterationWithoutAttributes(t *testing.T) {
+	// Test iteration without optional attributes
+	jsonData := `{
+		"id": "xyz789",
+		"name": "Backlog",
+		"path": "Project\\Backlog"
+	}`
+
+	var iter Iteration
+	err := json.Unmarshal([]byte(jsonData), &iter)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if iter.Name != "Backlog" {
+		t.Errorf("Name = %v, want %v", iter.Name, "Backlog")
+	}
+	if iter.Attributes != nil {
+		t.Error("Attributes should be nil when not provided")
+	}
+}
+
+func TestIterationsResponseParsing(t *testing.T) {
+	jsonData := `{
+		"count": 3,
+		"value": [
+			{"id": "1", "name": "Sprint 1", "path": "Project\\Sprint 1"},
+			{"id": "2", "name": "Sprint 2", "path": "Project\\Sprint 2"},
+			{"id": "3", "name": "Backlog", "path": "Project\\Backlog"}
+		]
+	}`
+
+	var response IterationsResponse
+	err := json.Unmarshal([]byte(jsonData), &response)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if response.Count != 3 {
+		t.Errorf("Count = %v, want %v", response.Count, 3)
+	}
+	if len(response.Value) != 3 {
+		t.Errorf("Value length = %v, want %v", len(response.Value), 3)
+	}
+	if response.Value[0].Name != "Sprint 1" {
+		t.Errorf("First iteration name = %v, want %v", response.Value[0].Name, "Sprint 1")
+	}
+}
+
+func TestWorkItemFieldsWithIterationPath(t *testing.T) {
+	// Test that IterationPath is correctly parsed from work item fields
+	jsonData := `{
+		"System.Title": "Test Item",
+		"System.State": "Active",
+		"System.WorkItemType": "Task",
+		"System.AreaPath": "Project\\Team",
+		"System.IterationPath": "Project\\Sprint 1"
+	}`
+
+	var fields WorkItemFields
+	err := json.Unmarshal([]byte(jsonData), &fields)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if fields.IterationPath != "Project\\Sprint 1" {
+		t.Errorf("IterationPath = %v, want %v", fields.IterationPath, "Project\\Sprint 1")
+	}
+	if fields.AreaPath != "Project\\Team" {
+		t.Errorf("AreaPath = %v, want %v", fields.AreaPath, "Project\\Team")
+	}
+}
