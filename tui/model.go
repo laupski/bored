@@ -1,11 +1,12 @@
 package tui
 
 import (
-	"bored/azdo"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"time"
+
+	"github.com/laupski/bored/azdo"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"

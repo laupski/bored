@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"bored/azdo"
+	"github.com/laupski/bored/azdo"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

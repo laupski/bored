@@ -1,4 +1,4 @@
-module bored
+module github.com/laupski/bored
 
 go 1.25
 

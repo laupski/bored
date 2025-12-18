@@ -1,8 +1,9 @@
 package tui
 
 import (
-	"bored/azdo"
 	"testing"
+
+	"github.com/laupski/bored/azdo"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

@@ -28,3 +28,6 @@ go.work
 
 bored
 bin/*
+
+# Macos
+.DS_Store

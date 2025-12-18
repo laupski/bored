@@ -1,10 +1,11 @@
 package tui
 
 import (
-	"bored/azdo"
 	"bytes"
 	"testing"
 	"time"
+
+	"github.com/laupski/bored/azdo"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

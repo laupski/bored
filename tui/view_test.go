@@ -1,9 +1,10 @@
 package tui
 
 import (
-	"bored/azdo"
 	"strings"
 	"testing"
+
+	"github.com/laupski/bored/azdo"
 )
 
 // Golden tests compare rendered output against expected patterns

@@ -1,11 +1,13 @@
 package tui
 
 import (
-	"bored/azdo"
 	"fmt"
+
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/laupski/bored/azdo"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
