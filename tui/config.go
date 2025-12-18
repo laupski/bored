@@ -57,6 +57,12 @@ func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.keychainLoaded = false
 			m.keychainMessage = "Credentials cleared from keychain"
 			return m, nil
+		case "ctrl+f":
+			// Open config file screen
+			m.view = ViewConfigFile
+			m.configFileFocus = 0
+			m.appConfigMessage = ""
+			return m, nil
 		}
 	}
 
@@ -119,7 +125,7 @@ func (m Model) viewConfig() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(helpStyle.Render("tab/↑↓: navigate • enter: connect • ctrl+d: clear keychain • ctrl+c: quit"))
+	b.WriteString(helpStyle.Render("tab/↑↓: navigate • enter: connect • ctrl+d: clear keychain • ctrl+f: settings • ctrl+c: quit"))
 
 	return boxStyle.Render(b.String())
 }

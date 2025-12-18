@@ -16,6 +16,7 @@ const (
 	ViewBoard
 	ViewCreate
 	ViewDetail
+	ViewConfigFile
 )
 
 type Model struct {
@@ -38,6 +39,11 @@ type Model struct {
 	keychainMessage string
 	username        string
 	showAll         bool
+	// App config (from config file)
+	appConfig        AppConfig
+	appConfigMessage string
+	configFileFocus  int // 0=DefaultShowAll, 1=MaxWorkItems
+	configFileInputs []textinput.Model
 	// Detail view fields
 	selectedItem     *azdo.WorkItem
 	detailInputs     []textinput.Model
@@ -187,13 +193,30 @@ func NewModel() Model {
 	detailInputs[4].Width = 60
 	detailInputs[4].Prompt = ""
 
+	// Config file inputs: MaxWorkItems (only text input needed for number)
+	configFileInputs := make([]textinput.Model, 1)
+
+	configFileInputs[0] = textinput.New()
+	configFileInputs[0].Placeholder = "50"
+	configFileInputs[0].Width = 10
+	configFileInputs[0].Prompt = ""
+
+	// Load app config from file
+	appConfig, _ := LoadConfigFile()
+
 	m := Model{
-		view:          ViewConfig,
-		configInputs:  configInputs,
-		createInputs:  createInputs,
-		detailInputs:  detailInputs,
-		workItemTypes: []string{"Bug", "Task", "User Story", "Feature", "Epic"},
+		view:             ViewConfig,
+		configInputs:     configInputs,
+		createInputs:     createInputs,
+		detailInputs:     detailInputs,
+		configFileInputs: configFileInputs,
+		appConfig:        appConfig,
+		showAll:          appConfig.DefaultShowAll,
+		workItemTypes:    []string{"Bug", "Task", "User Story", "Feature", "Epic"},
 	}
+
+	// Set initial value for max work items input
+	m.configFileInputs[0].SetValue(fmt.Sprintf("%d", appConfig.MaxWorkItems))
 
 	// Try to load credentials from keychain
 	if org, project, team, areaPath, pat, username, err := LoadCredentials(); err == nil {
@@ -377,6 +400,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCreate(msg)
 	case ViewDetail:
 		return m.updateDetail(msg)
+	case ViewConfigFile:
+		return m.updateConfigFile(msg)
 	}
 
 	return m, nil
@@ -392,6 +417,8 @@ func (m Model) View() string {
 		return m.viewCreate()
 	case ViewDetail:
 		return m.viewDetail()
+	case ViewConfigFile:
+		return m.viewConfigFile()
 	}
 	return ""
 }
