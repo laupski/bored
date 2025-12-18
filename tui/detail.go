@@ -131,6 +131,32 @@ func stripHTMLTags(text string, orgURL string) string {
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle iteration selection mode
+		if m.iterationExpanded {
+			switch msg.String() {
+			case "esc", "ctrl+t":
+				m.iterationExpanded = false
+				return m, nil
+			case "up":
+				if m.iterationCursor > 0 {
+					m.iterationCursor--
+				}
+				return m, nil
+			case "down":
+				if m.iterationCursor < len(m.iterations)-1 {
+					m.iterationCursor++
+				}
+				return m, nil
+			case "enter":
+				if m.iterationCursor < len(m.iterations) {
+					m.loading = true
+					return m, m.updateIteration(m.selectedItem.ID, m.iterations[m.iterationCursor].Path)
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Handle create related mode input
 		if m.creatingRelated {
 			switch msg.String() {
@@ -337,6 +363,26 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.createRelatedFocus = 0
 			}
 			return m, nil
+		case "ctrl+t":
+			// Toggle iteration selection (ctrl+t for timeline/sprint)
+			if !m.iterationExpanded {
+				m.iterationExpanded = true
+				m.iterationCursor = 0
+				// Find current iteration in list to set cursor
+				for i, iter := range m.iterations {
+					if iter.Path == m.selectedItem.Fields.IterationPath {
+						m.iterationCursor = i
+						break
+					}
+				}
+				// Fetch iterations if not already loaded
+				if len(m.iterations) == 0 {
+					return m, m.fetchIterations()
+				}
+			} else {
+				m.iterationExpanded = false
+			}
+			return m, nil
 		}
 	}
 
@@ -386,6 +432,8 @@ func (m Model) navigateToWorkItem(wi *azdo.WorkItem) (tea.Model, tea.Cmd) {
 	m.relatedCursor = 0
 	m.commentsExpanded = false
 	m.commentScroll = 0
+	m.iterationExpanded = false
+	m.iterationCursor = 0
 	m.detailFocus = 0
 	m.err = nil
 	m.message = ""
@@ -444,6 +492,65 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n")
 	b.WriteString(detailStyle.Render(fmt.Sprintf("Type: %s", wi.Fields.WorkItemType)))
 	b.WriteString("\n\n")
+
+	// Iteration section
+	iterationHeaderStyle := labelStyle.Copy()
+	if m.iterationExpanded {
+		iterationHeaderStyle = iterationHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
+	}
+
+	if m.iterationExpanded {
+		b.WriteString(iterationHeaderStyle.Render("▼ Iteration"))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+t: collapse, ↑↓: select, enter: set)"))
+	} else {
+		b.WriteString(labelStyle.Render("▶ Iteration"))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+t: change)"))
+	}
+	b.WriteString("\n")
+
+	if !m.iterationExpanded {
+		// Show current iteration
+		iterPath := wi.Fields.IterationPath
+		if iterPath == "" {
+			iterPath = "(none)"
+		}
+		b.WriteString(detailStyle.Render(iterPath))
+		b.WriteString("\n")
+	} else {
+		// Show iteration dropdown
+		iterItemStyle := lipgloss.NewStyle().Padding(0, 1)
+		selectedIterStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("229")).
+			Background(lipgloss.Color("57")).
+			Padding(0, 1)
+
+		if len(m.iterations) == 0 {
+			b.WriteString(detailStyle.Render("Loading iterations..."))
+			b.WriteString("\n")
+		} else {
+			for i, iter := range m.iterations {
+				style := iterItemStyle
+				if m.iterationCursor == i {
+					style = selectedIterStyle
+				}
+				// Mark current iteration
+				marker := "  "
+				if iter.Path == wi.Fields.IterationPath {
+					marker = "✓ "
+				}
+				// Show timeframe if available
+				timeFrame := ""
+				if iter.Attributes != nil && iter.Attributes.TimeFrame != "" {
+					timeFrame = fmt.Sprintf(" [%s]", iter.Attributes.TimeFrame)
+				}
+				b.WriteString(style.Render(fmt.Sprintf("%s%s%s", marker, iter.Name, timeFrame)))
+				b.WriteString("\n")
+			}
+		}
+	}
+	b.WriteString("\n")
 
 	// Related items section (parent/children)
 	relatedHeaderStyle := labelStyle.Copy()
@@ -645,6 +752,8 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n")
 	if m.commentsExpanded {
 		b.WriteString(helpStyle.Render("ctrl+e: collapse comments • ctrl+n/p: scroll • esc: back"))
+	} else if m.iterationExpanded {
+		b.WriteString(helpStyle.Render("ctrl+t: collapse • ↑↓: select • enter: set iteration • esc: back"))
 	} else if m.creatingRelated {
 		b.WriteString(helpStyle.Render("type title • ←/→: change type • enter: create • esc: cancel"))
 	} else if m.confirmingDelete {
@@ -655,7 +764,7 @@ func (m Model) viewDetail() string {
 	} else if m.relatedExpanded {
 		b.WriteString(helpStyle.Render("ctrl+r: collapse • ctrl+n: new child • ctrl+p: new parent • d: remove link • ↑↓: select • enter: open • esc: back"))
 	} else {
-		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • enter: add comment • ctrl+e: comments • ctrl+r: related • esc: back"))
+		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • ctrl+t: iteration • ctrl+e: comments • ctrl+r: related • esc: back"))
 	}
 
 	return boxStyle.Render(b.String())

@@ -35,16 +35,17 @@ type WorkItemRelation struct {
 }
 
 type WorkItemFields struct {
-	Title        string       `json:"System.Title"`
-	State        string       `json:"System.State"`
-	WorkItemType string       `json:"System.WorkItemType"`
-	AssignedTo   *IdentityRef `json:"System.AssignedTo"`
-	Description  string       `json:"System.Description"`
-	AreaPath     string       `json:"System.AreaPath"`
-	Priority     int          `json:"Microsoft.VSTS.Common.Priority"`
-	Tags         string       `json:"System.Tags"`
-	CommentCount int          `json:"System.CommentCount"`
-	ChangedDate  string       `json:"System.ChangedDate"`
+	Title         string       `json:"System.Title"`
+	State         string       `json:"System.State"`
+	WorkItemType  string       `json:"System.WorkItemType"`
+	AssignedTo    *IdentityRef `json:"System.AssignedTo"`
+	Description   string       `json:"System.Description"`
+	AreaPath      string       `json:"System.AreaPath"`
+	IterationPath string       `json:"System.IterationPath"`
+	Priority      int          `json:"Microsoft.VSTS.Common.Priority"`
+	Tags          string       `json:"System.Tags"`
+	CommentCount  int          `json:"System.CommentCount"`
+	ChangedDate   string       `json:"System.ChangedDate"`
 }
 
 type IdentityRef struct {
@@ -96,6 +97,24 @@ type WorkItemType struct {
 type WorkItemTypesResponse struct {
 	Count int            `json:"count"`
 	Value []WorkItemType `json:"value"`
+}
+
+type Iteration struct {
+	ID         string               `json:"id"`
+	Name       string               `json:"name"`
+	Path       string               `json:"path"`
+	Attributes *IterationAttributes `json:"attributes,omitempty"`
+}
+
+type IterationAttributes struct {
+	StartDate  string `json:"startDate,omitempty"`
+	FinishDate string `json:"finishDate,omitempty"`
+	TimeFrame  string `json:"timeFrame,omitempty"`
+}
+
+type IterationsResponse struct {
+	Count int         `json:"count"`
+	Value []Iteration `json:"value"`
 }
 
 func NewClient(org, project, team, areaPath, pat string) *Client {
@@ -718,4 +737,70 @@ func (c *Client) TestConnection() error {
 	}
 
 	return nil
+}
+
+// GetIterations fetches available iterations for the team
+func (c *Client) GetIterations() ([]Iteration, error) {
+	// Use team URL to get team iterations
+	iterationsURL := fmt.Sprintf("%s/_apis/work/teamsettings/iterations?api-version=7.0", c.teamURL())
+
+	req, err := http.NewRequest("GET", iterationsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result IterationsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result.Value, nil
+}
+
+// UpdateWorkItemIteration updates the iteration path of a work item
+func (c *Client) UpdateWorkItemIteration(workItemID int, iterationPath string) (*WorkItem, error) {
+	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	ops := []CreateWorkItemOp{
+		{Op: "replace", Path: "/fields/System.IterationPath", Value: iterationPath},
+	}
+
+	jsonBody, _ := json.Marshal(ops)
+
+	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var workItem WorkItem
+	if err := json.NewDecoder(resp.Body).Decode(&workItem); err != nil {
+		return nil, err
+	}
+
+	return &workItem, nil
 }

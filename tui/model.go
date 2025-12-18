@@ -72,6 +72,10 @@ type Model struct {
 	deleteWorkItemID    int    // ID of work item to delete
 	deleteWorkItemTitle string // Title of work item to delete (for confirmation)
 	deleteConfirmInput  string // User's typed confirmation
+	// Iteration state
+	iterations        []azdo.Iteration // available iterations
+	iterationExpanded bool             // true when iteration dropdown is shown
+	iterationCursor   int              // selected iteration index in dropdown
 }
 
 var (
@@ -389,6 +393,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("Deleted work item #%d", m.deleteWorkItemID)
 		m.cursor = 0
 		return m, m.fetchWorkItems()
+
+	case iterationsMsg:
+		if msg.err == nil {
+			m.iterations = msg.iterations
+		}
+		return m, nil
+
+	case updateIterationMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.message = "Iteration updated"
+		m.selectedItem = msg.item
+		m.iterationExpanded = false
+		return m, nil
 	}
 
 	switch m.view {
@@ -500,6 +521,16 @@ type deleteWorkItemMsg struct {
 	err error
 }
 
+type iterationsMsg struct {
+	iterations []azdo.Iteration
+	err        error
+}
+
+type updateIterationMsg struct {
+	item *azdo.WorkItem
+	err  error
+}
+
 func (m Model) fetchComments(workItemID int) tea.Cmd {
 	return func() tea.Msg {
 		comments, err := m.client.GetComments(workItemID)
@@ -560,5 +591,19 @@ func (m Model) deleteWorkItem(workItemID int) tea.Cmd {
 	return func() tea.Msg {
 		err := m.client.DeleteWorkItem(workItemID)
 		return deleteWorkItemMsg{err: err}
+	}
+}
+
+func (m Model) fetchIterations() tea.Cmd {
+	return func() tea.Msg {
+		iterations, err := m.client.GetIterations()
+		return iterationsMsg{iterations: iterations, err: err}
+	}
+}
+
+func (m Model) updateIteration(workItemID int, iterationPath string) tea.Cmd {
+	return func() tea.Msg {
+		item, err := m.client.UpdateWorkItemIteration(workItemID, iterationPath)
+		return updateIterationMsg{item: item, err: err}
 	}
 }
