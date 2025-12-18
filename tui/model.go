@@ -76,6 +76,11 @@ type Model struct {
 	iterations        []azdo.Iteration // available iterations
 	iterationExpanded bool             // true when iteration dropdown is shown
 	iterationCursor   int              // selected iteration index in dropdown
+	// Planning state
+	planningExpanded bool                 // true when planning section is expanded
+	planningFocus    int                  // current field focus index
+	planningInputs   []textinput.Model    // text inputs for planning fields
+	planningFields   []azdo.PlanningField // available planning fields for current work item type
 }
 
 var (
@@ -205,6 +210,29 @@ func NewModel() Model {
 	configFileInputs[0].Width = 10
 	configFileInputs[0].Prompt = ""
 
+	// Planning inputs: Story Points, Original Estimate, Remaining Work, Completed Work
+	planningInputs := make([]textinput.Model, 4)
+
+	planningInputs[0] = textinput.New()
+	planningInputs[0].Placeholder = "0"
+	planningInputs[0].Width = 10
+	planningInputs[0].Prompt = ""
+
+	planningInputs[1] = textinput.New()
+	planningInputs[1].Placeholder = "0"
+	planningInputs[1].Width = 10
+	planningInputs[1].Prompt = ""
+
+	planningInputs[2] = textinput.New()
+	planningInputs[2].Placeholder = "0"
+	planningInputs[2].Width = 10
+	planningInputs[2].Prompt = ""
+
+	planningInputs[3] = textinput.New()
+	planningInputs[3].Placeholder = "0"
+	planningInputs[3].Width = 10
+	planningInputs[3].Prompt = ""
+
 	// Load app config from file
 	appConfig, _ := LoadConfigFile()
 
@@ -214,6 +242,7 @@ func NewModel() Model {
 		createInputs:     createInputs,
 		detailInputs:     detailInputs,
 		configFileInputs: configFileInputs,
+		planningInputs:   planningInputs,
 		appConfig:        appConfig,
 		showAll:          appConfig.DefaultShowAll,
 		workItemTypes:    []string{"Bug", "Task", "User Story", "Feature", "Epic"},
@@ -277,6 +306,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view = ViewBoard
 				m.err = nil
 				m.message = ""
+				// Auto-collapse all expanded sections
+				m.planningExpanded = false
+				m.commentsExpanded = false
+				m.relatedExpanded = false
+				m.iterationExpanded = false
 				return m, nil
 			}
 		}
@@ -410,6 +444,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedItem = msg.item
 		m.iterationExpanded = false
 		return m, nil
+
+	case updatePlanningMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.message = "Planning updated"
+		m.selectedItem = msg.item
+		// Update planning inputs with the new values
+		m.updatePlanningInputsFromWorkItem()
+		return m, nil
+
+	case planningFieldsMsg:
+		if msg.err == nil {
+			m.planningFields = msg.fields
+			// Ensure we have enough inputs for the fields
+			for len(m.planningInputs) < len(m.planningFields) {
+				input := textinput.New()
+				input.Placeholder = "0"
+				input.Width = 10
+				input.Prompt = ""
+				m.planningInputs = append(m.planningInputs, input)
+			}
+			// Update planning inputs with current values from work item
+			m.updatePlanningInputsFromWorkItemDynamic()
+		}
+		return m, nil
 	}
 
 	switch m.view {
@@ -531,6 +593,16 @@ type updateIterationMsg struct {
 	err  error
 }
 
+type updatePlanningMsg struct {
+	item *azdo.WorkItem
+	err  error
+}
+
+type planningFieldsMsg struct {
+	fields []azdo.PlanningField
+	err    error
+}
+
 func (m Model) fetchComments(workItemID int) tea.Cmd {
 	return func() tea.Msg {
 		comments, err := m.client.GetComments(workItemID)
@@ -605,5 +677,89 @@ func (m Model) updateIteration(workItemID int, iterationPath string) tea.Cmd {
 	return func() tea.Msg {
 		item, err := m.client.UpdateWorkItemIteration(workItemID, iterationPath)
 		return updateIterationMsg{item: item, err: err}
+	}
+}
+
+func (m Model) fetchPlanningFields(workItemType string) tea.Cmd {
+	return func() tea.Msg {
+		fields, err := m.client.GetPlanningFields(workItemType)
+		return planningFieldsMsg{fields: fields, err: err}
+	}
+}
+
+func (m Model) updatePlanningDynamic(workItemID int, fields map[string]float64) tea.Cmd {
+	return func() tea.Msg {
+		item, err := m.client.UpdateWorkItemPlanningDynamic(workItemID, fields)
+		return updatePlanningMsg{item: item, err: err}
+	}
+}
+
+func (m Model) updatePlanning(workItemID int, storyPoints, originalEstimate, remainingWork, completedWork *float64) tea.Cmd {
+	return func() tea.Msg {
+		item, err := m.client.UpdateWorkItemPlanning(workItemID, storyPoints, originalEstimate, remainingWork, completedWork)
+		return updatePlanningMsg{item: item, err: err}
+	}
+}
+
+// updatePlanningInputsFromWorkItem populates the planning inputs from the selected work item (static)
+func (m *Model) updatePlanningInputsFromWorkItem() {
+	if m.selectedItem == nil {
+		return
+	}
+
+	// Story Points
+	if m.selectedItem.Fields.StoryPoints != nil {
+		m.planningInputs[0].SetValue(fmt.Sprintf("%.1f", *m.selectedItem.Fields.StoryPoints))
+	} else {
+		m.planningInputs[0].SetValue("")
+	}
+
+	// Original Estimate
+	if m.selectedItem.Fields.OriginalEstimate != nil {
+		m.planningInputs[1].SetValue(fmt.Sprintf("%.1f", *m.selectedItem.Fields.OriginalEstimate))
+	} else {
+		m.planningInputs[1].SetValue("")
+	}
+
+	// Remaining Work
+	if m.selectedItem.Fields.RemainingWork != nil {
+		m.planningInputs[2].SetValue(fmt.Sprintf("%.1f", *m.selectedItem.Fields.RemainingWork))
+	} else {
+		m.planningInputs[2].SetValue("")
+	}
+
+	// Completed Work
+	if m.selectedItem.Fields.CompletedWork != nil {
+		m.planningInputs[3].SetValue(fmt.Sprintf("%.1f", *m.selectedItem.Fields.CompletedWork))
+	} else {
+		m.planningInputs[3].SetValue("")
+	}
+}
+
+// updatePlanningInputsFromWorkItemDynamic populates the planning inputs based on dynamic field definitions
+func (m *Model) updatePlanningInputsFromWorkItemDynamic() {
+	if m.selectedItem == nil {
+		return
+	}
+
+	// Map of reference names to current values
+	fieldValues := map[string]*float64{
+		"Microsoft.VSTS.Scheduling.StoryPoints":      m.selectedItem.Fields.StoryPoints,
+		"Microsoft.VSTS.Scheduling.OriginalEstimate": m.selectedItem.Fields.OriginalEstimate,
+		"Microsoft.VSTS.Scheduling.RemainingWork":    m.selectedItem.Fields.RemainingWork,
+		"Microsoft.VSTS.Scheduling.CompletedWork":    m.selectedItem.Fields.CompletedWork,
+		"Microsoft.VSTS.Scheduling.Effort":           m.selectedItem.Fields.Effort,
+	}
+
+	// Populate inputs based on the dynamic fields
+	for i, field := range m.planningFields {
+		if i >= len(m.planningInputs) {
+			break
+		}
+		if val, ok := fieldValues[field.ReferenceName]; ok && val != nil {
+			m.planningInputs[i].SetValue(fmt.Sprintf("%.1f", *val))
+		} else {
+			m.planningInputs[i].SetValue("")
+		}
 	}
 }

@@ -371,3 +371,176 @@ func TestWorkItemFieldsWithIterationPath(t *testing.T) {
 		t.Errorf("AreaPath = %v, want %v", fields.AreaPath, "Project\\Team")
 	}
 }
+
+func TestWorkItemFieldsWithPlanningFields(t *testing.T) {
+	// Test that planning fields are correctly parsed from work item fields
+	jsonData := `{
+		"System.Title": "Test User Story",
+		"System.State": "Active",
+		"System.WorkItemType": "User Story",
+		"Microsoft.VSTS.Scheduling.StoryPoints": 5.0,
+		"Microsoft.VSTS.Scheduling.OriginalEstimate": 8.0,
+		"Microsoft.VSTS.Scheduling.RemainingWork": 4.5,
+		"Microsoft.VSTS.Scheduling.CompletedWork": 3.5,
+		"Microsoft.VSTS.Scheduling.Effort": 13.0
+	}`
+
+	var fields WorkItemFields
+	err := json.Unmarshal([]byte(jsonData), &fields)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if fields.StoryPoints == nil {
+		t.Error("StoryPoints should not be nil")
+	} else if *fields.StoryPoints != 5.0 {
+		t.Errorf("StoryPoints = %v, want %v", *fields.StoryPoints, 5.0)
+	}
+
+	if fields.OriginalEstimate == nil {
+		t.Error("OriginalEstimate should not be nil")
+	} else if *fields.OriginalEstimate != 8.0 {
+		t.Errorf("OriginalEstimate = %v, want %v", *fields.OriginalEstimate, 8.0)
+	}
+
+	if fields.RemainingWork == nil {
+		t.Error("RemainingWork should not be nil")
+	} else if *fields.RemainingWork != 4.5 {
+		t.Errorf("RemainingWork = %v, want %v", *fields.RemainingWork, 4.5)
+	}
+
+	if fields.CompletedWork == nil {
+		t.Error("CompletedWork should not be nil")
+	} else if *fields.CompletedWork != 3.5 {
+		t.Errorf("CompletedWork = %v, want %v", *fields.CompletedWork, 3.5)
+	}
+
+	if fields.Effort == nil {
+		t.Error("Effort should not be nil")
+	} else if *fields.Effort != 13.0 {
+		t.Errorf("Effort = %v, want %v", *fields.Effort, 13.0)
+	}
+}
+
+func TestWorkItemFieldsWithoutPlanningFields(t *testing.T) {
+	// Test that missing planning fields are nil
+	jsonData := `{
+		"System.Title": "Test Task",
+		"System.State": "Active",
+		"System.WorkItemType": "Task"
+	}`
+
+	var fields WorkItemFields
+	err := json.Unmarshal([]byte(jsonData), &fields)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if fields.StoryPoints != nil {
+		t.Error("StoryPoints should be nil when not provided")
+	}
+	if fields.OriginalEstimate != nil {
+		t.Error("OriginalEstimate should be nil when not provided")
+	}
+	if fields.RemainingWork != nil {
+		t.Error("RemainingWork should be nil when not provided")
+	}
+	if fields.CompletedWork != nil {
+		t.Error("CompletedWork should be nil when not provided")
+	}
+	if fields.Effort != nil {
+		t.Error("Effort should be nil when not provided")
+	}
+}
+
+func TestWorkItemTypeFieldParsing(t *testing.T) {
+	// Test JSON unmarshaling of work item type field
+	jsonData := `{
+		"referenceName": "Microsoft.VSTS.Scheduling.StoryPoints",
+		"name": "Story Points",
+		"alwaysRequired": false,
+		"defaultValue": null,
+		"readOnly": false
+	}`
+
+	var field WorkItemTypeField
+	err := json.Unmarshal([]byte(jsonData), &field)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if field.ReferenceName != "Microsoft.VSTS.Scheduling.StoryPoints" {
+		t.Errorf("ReferenceName = %v, want %v", field.ReferenceName, "Microsoft.VSTS.Scheduling.StoryPoints")
+	}
+	if field.Name != "Story Points" {
+		t.Errorf("Name = %v, want %v", field.Name, "Story Points")
+	}
+	if field.AlwaysRequired != false {
+		t.Errorf("AlwaysRequired = %v, want %v", field.AlwaysRequired, false)
+	}
+	if field.ReadOnly != false {
+		t.Errorf("ReadOnly = %v, want %v", field.ReadOnly, false)
+	}
+}
+
+func TestWorkItemTypeFieldsResponseParsing(t *testing.T) {
+	jsonData := `{
+		"count": 3,
+		"value": [
+			{"referenceName": "Microsoft.VSTS.Scheduling.StoryPoints", "name": "Story Points", "readOnly": false},
+			{"referenceName": "Microsoft.VSTS.Scheduling.OriginalEstimate", "name": "Original Estimate", "readOnly": false},
+			{"referenceName": "System.Title", "name": "Title", "readOnly": false}
+		]
+	}`
+
+	var response WorkItemTypeFieldsResponse
+	err := json.Unmarshal([]byte(jsonData), &response)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if response.Count != 3 {
+		t.Errorf("Count = %v, want %v", response.Count, 3)
+	}
+	if len(response.Value) != 3 {
+		t.Errorf("Value length = %v, want %v", len(response.Value), 3)
+	}
+	if response.Value[0].ReferenceName != "Microsoft.VSTS.Scheduling.StoryPoints" {
+		t.Errorf("First field ReferenceName = %v, want %v", response.Value[0].ReferenceName, "Microsoft.VSTS.Scheduling.StoryPoints")
+	}
+}
+
+func TestPlanningField(t *testing.T) {
+	// Test PlanningField struct creation
+	value := 5.0
+	field := PlanningField{
+		ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints",
+		DisplayName:   "Story Points",
+		Value:         &value,
+	}
+
+	if field.ReferenceName != "Microsoft.VSTS.Scheduling.StoryPoints" {
+		t.Errorf("ReferenceName = %v, want %v", field.ReferenceName, "Microsoft.VSTS.Scheduling.StoryPoints")
+	}
+	if field.DisplayName != "Story Points" {
+		t.Errorf("DisplayName = %v, want %v", field.DisplayName, "Story Points")
+	}
+	if field.Value == nil {
+		t.Error("Value should not be nil")
+	} else if *field.Value != 5.0 {
+		t.Errorf("Value = %v, want %v", *field.Value, 5.0)
+	}
+}
+
+func TestPlanningFieldNilValue(t *testing.T) {
+	// Test PlanningField with nil value
+	field := PlanningField{
+		ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints",
+		DisplayName:   "Story Points",
+		Value:         nil,
+	}
+
+	if field.Value != nil {
+		t.Error("Value should be nil")
+	}
+}

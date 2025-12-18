@@ -341,3 +341,171 @@ func TestGetIterationDisplayOrderNilSelectedItem(t *testing.T) {
 		t.Errorf("getIterationDisplayOrder() with nil selectedItem should return original iterations, got length %d", len(result))
 	}
 }
+
+func TestUpdatePlanningInputsFromWorkItemDynamic(t *testing.T) {
+	storyPoints := 5.0
+	originalEstimate := 8.0
+	remainingWork := 4.5
+
+	m := NewModel()
+	m.selectedItem = &azdo.WorkItem{
+		ID: 123,
+		Fields: azdo.WorkItemFields{
+			Title:            "Test Item",
+			WorkItemType:     "User Story",
+			StoryPoints:      &storyPoints,
+			OriginalEstimate: &originalEstimate,
+			RemainingWork:    &remainingWork,
+			CompletedWork:    nil, // Test nil handling
+		},
+	}
+	m.planningFields = []azdo.PlanningField{
+		{ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints", DisplayName: "Story Points"},
+		{ReferenceName: "Microsoft.VSTS.Scheduling.OriginalEstimate", DisplayName: "Original Estimate"},
+		{ReferenceName: "Microsoft.VSTS.Scheduling.RemainingWork", DisplayName: "Remaining Work"},
+		{ReferenceName: "Microsoft.VSTS.Scheduling.CompletedWork", DisplayName: "Completed Work"},
+	}
+
+	m.updatePlanningInputsFromWorkItemDynamic()
+
+	// Check that inputs are populated correctly
+	if m.planningInputs[0].Value() != "5.0" {
+		t.Errorf("planningInputs[0] = %v, want %v", m.planningInputs[0].Value(), "5.0")
+	}
+	if m.planningInputs[1].Value() != "8.0" {
+		t.Errorf("planningInputs[1] = %v, want %v", m.planningInputs[1].Value(), "8.0")
+	}
+	if m.planningInputs[2].Value() != "4.5" {
+		t.Errorf("planningInputs[2] = %v, want %v", m.planningInputs[2].Value(), "4.5")
+	}
+	if m.planningInputs[3].Value() != "" {
+		t.Errorf("planningInputs[3] should be empty for nil value, got %v", m.planningInputs[3].Value())
+	}
+}
+
+func TestUpdatePlanningInputsFromWorkItemDynamicNilSelectedItem(t *testing.T) {
+	m := NewModel()
+	m.selectedItem = nil
+	m.planningFields = []azdo.PlanningField{
+		{ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints", DisplayName: "Story Points"},
+	}
+
+	// Should not panic when selectedItem is nil
+	m.updatePlanningInputsFromWorkItemDynamic()
+}
+
+func TestUpdatePlanningInputsFromWorkItem(t *testing.T) {
+	storyPoints := 3.0
+	originalEstimate := 10.0
+	remainingWork := 6.0
+	completedWork := 4.0
+
+	m := NewModel()
+	m.selectedItem = &azdo.WorkItem{
+		ID: 456,
+		Fields: azdo.WorkItemFields{
+			Title:            "Test Task",
+			WorkItemType:     "Task",
+			StoryPoints:      &storyPoints,
+			OriginalEstimate: &originalEstimate,
+			RemainingWork:    &remainingWork,
+			CompletedWork:    &completedWork,
+		},
+	}
+
+	m.updatePlanningInputsFromWorkItem()
+
+	// Check static input population
+	if m.planningInputs[0].Value() != "3.0" {
+		t.Errorf("planningInputs[0] = %v, want %v", m.planningInputs[0].Value(), "3.0")
+	}
+	if m.planningInputs[1].Value() != "10.0" {
+		t.Errorf("planningInputs[1] = %v, want %v", m.planningInputs[1].Value(), "10.0")
+	}
+	if m.planningInputs[2].Value() != "6.0" {
+		t.Errorf("planningInputs[2] = %v, want %v", m.planningInputs[2].Value(), "6.0")
+	}
+	if m.planningInputs[3].Value() != "4.0" {
+		t.Errorf("planningInputs[3] = %v, want %v", m.planningInputs[3].Value(), "4.0")
+	}
+}
+
+func TestUpdatePlanningInputsFromWorkItemNilValues(t *testing.T) {
+	m := NewModel()
+	m.selectedItem = &azdo.WorkItem{
+		ID: 789,
+		Fields: azdo.WorkItemFields{
+			Title:        "Test Item",
+			WorkItemType: "Bug",
+			// All planning fields are nil
+		},
+	}
+
+	m.updatePlanningInputsFromWorkItem()
+
+	// All inputs should be empty
+	for i := 0; i < 4; i++ {
+		if m.planningInputs[i].Value() != "" {
+			t.Errorf("planningInputs[%d] should be empty, got %v", i, m.planningInputs[i].Value())
+		}
+	}
+}
+
+func TestPlanningStateInitialization(t *testing.T) {
+	m := NewModel()
+
+	// Check that planning state is properly initialized
+	if m.planningExpanded {
+		t.Error("planningExpanded should be false initially")
+	}
+	if m.planningFocus != 0 {
+		t.Errorf("planningFocus = %v, want %v", m.planningFocus, 0)
+	}
+	if len(m.planningInputs) != 4 {
+		t.Errorf("planningInputs length = %v, want %v", len(m.planningInputs), 4)
+	}
+	if m.planningFields != nil {
+		t.Error("planningFields should be nil initially")
+	}
+}
+
+func TestPlanningFieldsCount(t *testing.T) {
+	tests := []struct {
+		name       string
+		fields     []azdo.PlanningField
+		wantLength int
+	}{
+		{
+			name:       "empty fields",
+			fields:     []azdo.PlanningField{},
+			wantLength: 0,
+		},
+		{
+			name: "single field",
+			fields: []azdo.PlanningField{
+				{ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints", DisplayName: "Story Points"},
+			},
+			wantLength: 1,
+		},
+		{
+			name: "multiple fields",
+			fields: []azdo.PlanningField{
+				{ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints", DisplayName: "Story Points"},
+				{ReferenceName: "Microsoft.VSTS.Scheduling.OriginalEstimate", DisplayName: "Original Estimate"},
+				{ReferenceName: "Microsoft.VSTS.Scheduling.RemainingWork", DisplayName: "Remaining Work"},
+			},
+			wantLength: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := Model{
+				planningFields: tt.fields,
+			}
+			if len(m.planningFields) != tt.wantLength {
+				t.Errorf("planningFields length = %v, want %v", len(m.planningFields), tt.wantLength)
+			}
+		})
+	}
+}

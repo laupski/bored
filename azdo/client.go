@@ -46,6 +46,12 @@ type WorkItemFields struct {
 	Tags          string       `json:"System.Tags"`
 	CommentCount  int          `json:"System.CommentCount"`
 	ChangedDate   string       `json:"System.ChangedDate"`
+	// Planning fields
+	StoryPoints      *float64 `json:"Microsoft.VSTS.Scheduling.StoryPoints,omitempty"`
+	OriginalEstimate *float64 `json:"Microsoft.VSTS.Scheduling.OriginalEstimate,omitempty"`
+	RemainingWork    *float64 `json:"Microsoft.VSTS.Scheduling.RemainingWork,omitempty"`
+	CompletedWork    *float64 `json:"Microsoft.VSTS.Scheduling.CompletedWork,omitempty"`
+	Effort           *float64 `json:"Microsoft.VSTS.Scheduling.Effort,omitempty"`
 }
 
 type IdentityRef struct {
@@ -115,6 +121,27 @@ type IterationAttributes struct {
 type IterationsResponse struct {
 	Count int         `json:"count"`
 	Value []Iteration `json:"value"`
+}
+
+// WorkItemTypeField represents a field definition for a work item type
+type WorkItemTypeField struct {
+	ReferenceName  string      `json:"referenceName"`
+	Name           string      `json:"name"`
+	AlwaysRequired bool        `json:"alwaysRequired"`
+	DefaultValue   interface{} `json:"defaultValue"`
+	ReadOnly       bool        `json:"readOnly"`
+}
+
+type WorkItemTypeFieldsResponse struct {
+	Count int                 `json:"count"`
+	Value []WorkItemTypeField `json:"value"`
+}
+
+// PlanningField represents a planning field that can be displayed/edited
+type PlanningField struct {
+	ReferenceName string   // Azure DevOps field reference name
+	DisplayName   string   // User-friendly display name
+	Value         *float64 // Current value
 }
 
 func NewClient(org, project, team, areaPath, pat string) *Client {
@@ -767,6 +794,167 @@ func (c *Client) GetIterations() ([]Iteration, error) {
 	}
 
 	return result.Value, nil
+}
+
+// UpdateWorkItemPlanning updates the planning fields of a work item
+// Pass nil for any field you don't want to update
+func (c *Client) UpdateWorkItemPlanning(workItemID int, storyPoints, originalEstimate, remainingWork, completedWork *float64) (*WorkItem, error) {
+	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	var ops []CreateWorkItemOp
+
+	// Use "add" operation for fields that might not exist, "replace" might fail
+	if storyPoints != nil {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.StoryPoints", Value: *storyPoints})
+	}
+	if originalEstimate != nil {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.OriginalEstimate", Value: *originalEstimate})
+	}
+	if remainingWork != nil {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.RemainingWork", Value: *remainingWork})
+	}
+	if completedWork != nil {
+		ops = append(ops, CreateWorkItemOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.CompletedWork", Value: *completedWork})
+	}
+
+	if len(ops) == 0 {
+		return nil, fmt.Errorf("no planning updates specified")
+	}
+
+	jsonBody, _ := json.Marshal(ops)
+
+	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var workItem WorkItem
+	if err := json.NewDecoder(resp.Body).Decode(&workItem); err != nil {
+		return nil, err
+	}
+
+	return &workItem, nil
+}
+
+// GetWorkItemTypeFields fetches the available fields for a work item type
+func (c *Client) GetWorkItemTypeFields(workItemType string) ([]WorkItemTypeField, error) {
+	fieldsURL := fmt.Sprintf("%s/_apis/wit/workitemtypes/%s/fields?api-version=7.0", c.baseURL(), url.PathEscape(workItemType))
+
+	req, err := http.NewRequest("GET", fieldsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result WorkItemTypeFieldsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result.Value, nil
+}
+
+// GetPlanningFields returns the available planning fields for a work item type
+// This filters to only scheduling/planning related fields
+func (c *Client) GetPlanningFields(workItemType string) ([]PlanningField, error) {
+	fields, err := c.GetWorkItemTypeFields(workItemType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Planning field reference names and their display names
+	planningFieldMap := map[string]string{
+		"Microsoft.VSTS.Scheduling.StoryPoints":      "Story Points",
+		"Microsoft.VSTS.Scheduling.OriginalEstimate": "Original Estimate (hours)",
+		"Microsoft.VSTS.Scheduling.RemainingWork":    "Remaining Work (hours)",
+		"Microsoft.VSTS.Scheduling.CompletedWork":    "Completed Work (hours)",
+		"Microsoft.VSTS.Scheduling.Effort":           "Effort",
+	}
+
+	var planningFields []PlanningField
+	for _, field := range fields {
+		if displayName, ok := planningFieldMap[field.ReferenceName]; ok {
+			// Only include if not read-only
+			if !field.ReadOnly {
+				planningFields = append(planningFields, PlanningField{
+					ReferenceName: field.ReferenceName,
+					DisplayName:   displayName,
+				})
+			}
+		}
+	}
+
+	return planningFields, nil
+}
+
+// UpdateWorkItemPlanningDynamic updates planning fields dynamically based on the provided map
+func (c *Client) UpdateWorkItemPlanningDynamic(workItemID int, fields map[string]float64) (*WorkItem, error) {
+	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	var ops []CreateWorkItemOp
+
+	for referenceName, value := range fields {
+		ops = append(ops, CreateWorkItemOp{
+			Op:    "add",
+			Path:  "/fields/" + referenceName,
+			Value: value,
+		})
+	}
+
+	if len(ops) == 0 {
+		return nil, fmt.Errorf("no planning updates specified")
+	}
+
+	jsonBody, _ := json.Marshal(ops)
+
+	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var workItem WorkItem
+	if err := json.NewDecoder(resp.Body).Decode(&workItem); err != nil {
+		return nil, err
+	}
+
+	return &workItem, nil
 }
 
 // UpdateWorkItemIteration updates the iteration path of a work item

@@ -131,6 +131,34 @@ func stripHTMLTags(text string, orgURL string) string {
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle planning edit mode
+		if m.planningExpanded {
+			fieldCount := len(m.planningFields)
+			if fieldCount == 0 {
+				fieldCount = 1 // Avoid division by zero
+			}
+			switch msg.String() {
+			case "esc", "ctrl+g":
+				m.planningExpanded = false
+				return m, nil
+			case "tab", "down":
+				m.planningFocus = (m.planningFocus + 1) % fieldCount
+				return m, m.updatePlanningFocus()
+			case "shift+tab", "up":
+				m.planningFocus--
+				if m.planningFocus < 0 {
+					m.planningFocus = fieldCount - 1
+				}
+				return m, m.updatePlanningFocus()
+			case "enter":
+				// Save planning fields dynamically
+				return m, m.savePlanningFieldsDynamic()
+			}
+			// Update the focused planning input
+			cmd := m.updatePlanningInputs(msg)
+			return m, cmd
+		}
+
 		// Handle iteration selection mode
 		if m.iterationExpanded {
 			switch msg.String() {
@@ -385,6 +413,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Auto-collapse other sections
 				m.commentsExpanded = false
 				m.relatedExpanded = false
+				m.planningExpanded = false
 				// Find current iteration in list to set cursor
 				for i, iter := range m.iterations {
 					if iter.Path == m.selectedItem.Fields.IterationPath {
@@ -398,6 +427,28 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else {
 				m.iterationExpanded = false
+			}
+			return m, nil
+		case "ctrl+g":
+			// Toggle planning section (ctrl+g for planning Goals/estimates)
+			if !m.planningExpanded {
+				m.planningExpanded = true
+				m.planningFocus = 0
+				// Auto-collapse other sections
+				m.commentsExpanded = false
+				m.relatedExpanded = false
+				m.iterationExpanded = false
+				// Fetch available planning fields for this work item type
+				// and load current values into inputs
+				if m.selectedItem != nil {
+					return m, tea.Batch(
+						m.fetchPlanningFields(m.selectedItem.Fields.WorkItemType),
+						m.updatePlanningFocus(),
+					)
+				}
+				return m, m.updatePlanningFocus()
+			} else {
+				m.planningExpanded = false
 			}
 			return m, nil
 		}
@@ -751,6 +802,70 @@ func (m Model) viewDetail() string {
 			b.WriteString("\n")
 		}
 	}
+	b.WriteString("\n")
+
+	// Planning section
+	planningHeaderStyle := labelStyle.Copy()
+	if m.planningExpanded {
+		planningHeaderStyle = planningHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
+	}
+
+	if m.planningExpanded {
+		b.WriteString(planningHeaderStyle.Render("▼ Planning"))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+g: collapse, ↑↓: navigate, enter: save)"))
+	} else {
+		b.WriteString(labelStyle.Render("▶ Planning"))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+g: edit)"))
+	}
+	b.WriteString("\n")
+
+	if !m.planningExpanded {
+		// Collapsed: show summary of planning values
+		var planningParts []string
+		if wi.Fields.StoryPoints != nil {
+			planningParts = append(planningParts, fmt.Sprintf("Story Points: %.1f", *wi.Fields.StoryPoints))
+		}
+		if wi.Fields.OriginalEstimate != nil {
+			planningParts = append(planningParts, fmt.Sprintf("Original: %.1fh", *wi.Fields.OriginalEstimate))
+		}
+		if wi.Fields.RemainingWork != nil {
+			planningParts = append(planningParts, fmt.Sprintf("Remaining: %.1fh", *wi.Fields.RemainingWork))
+		}
+		if wi.Fields.CompletedWork != nil {
+			planningParts = append(planningParts, fmt.Sprintf("Completed: %.1fh", *wi.Fields.CompletedWork))
+		}
+		if len(planningParts) == 0 {
+			b.WriteString(detailStyle.Render("No planning data"))
+		} else {
+			b.WriteString(detailStyle.Render(strings.Join(planningParts, " • ")))
+		}
+		b.WriteString("\n")
+	} else {
+		// Expanded: show editable planning fields dynamically
+		if len(m.planningFields) == 0 {
+			b.WriteString(detailStyle.Render("Loading available planning fields..."))
+			b.WriteString("\n")
+		} else {
+			for i, field := range m.planningFields {
+				if i >= len(m.planningInputs) {
+					break
+				}
+				style := detailStyle
+				if i == m.planningFocus {
+					style = lipgloss.NewStyle().Foreground(lipgloss.Color("229"))
+				}
+				b.WriteString(style.Render(field.DisplayName + ": "))
+				b.WriteString(m.planningInputs[i].View())
+				b.WriteString("\n")
+			}
+		}
+		if len(m.planningFields) == 0 {
+			b.WriteString(hintStyle.Render("(no planning fields available for this work item type)"))
+			b.WriteString("\n")
+		}
+	}
 
 	// Error/success messages
 	if m.err != nil {
@@ -781,8 +896,10 @@ func (m Model) viewDetail() string {
 		b.WriteString(confirmStyle.Render(fmt.Sprintf("Remove link to #%d? (y/n)", m.confirmDeleteTargetID)))
 	} else if m.relatedExpanded {
 		b.WriteString(helpStyle.Render("ctrl+r: collapse • ctrl+n: new child • ctrl+p: new parent • d: remove link • ↑↓: select • enter: open • esc: back"))
+	} else if m.planningExpanded {
+		b.WriteString(helpStyle.Render("ctrl+g: collapse • ↑↓: navigate • enter: save • esc: back"))
 	} else {
-		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • ctrl+t: iteration • ctrl+e: comments • ctrl+r: related • esc: back"))
+		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • ctrl+t: iteration • ctrl+e: comments • ctrl+r: related • ctrl+g: planning • esc: back"))
 	}
 
 	return boxStyle.Render(b.String())
@@ -797,6 +914,103 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// updatePlanningFocus updates which planning input has focus
+func (m *Model) updatePlanningFocus() tea.Cmd {
+	cmds := make([]tea.Cmd, len(m.planningInputs))
+	for i := range m.planningInputs {
+		if i == m.planningFocus {
+			cmds[i] = m.planningInputs[i].Focus()
+		} else {
+			m.planningInputs[i].Blur()
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// updatePlanningInputs updates all planning inputs with the given message
+func (m *Model) updatePlanningInputs(msg tea.Msg) tea.Cmd {
+	cmds := make([]tea.Cmd, len(m.planningInputs))
+	for i := range m.planningInputs {
+		m.planningInputs[i], cmds[i] = m.planningInputs[i].Update(msg)
+	}
+	return tea.Batch(cmds...)
+}
+
+// savePlanningFieldsDynamic parses and saves the planning fields dynamically based on available fields
+func (m *Model) savePlanningFieldsDynamic() tea.Cmd {
+	if len(m.planningFields) == 0 {
+		return nil
+	}
+
+	fields := make(map[string]float64)
+
+	// Parse each field based on the dynamic field definitions
+	for i, field := range m.planningFields {
+		if i >= len(m.planningInputs) {
+			break
+		}
+		if v := m.planningInputs[i].Value(); v != "" {
+			var f float64
+			if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+				fields[field.ReferenceName] = f
+			}
+		}
+	}
+
+	// Only update if at least one field has a value
+	if len(fields) == 0 {
+		return nil
+	}
+
+	m.loading = true
+	return m.updatePlanningDynamic(m.selectedItem.ID, fields)
+}
+
+// savePlanningFields parses and saves the planning fields
+func (m *Model) savePlanningFields() tea.Cmd {
+	var storyPoints, originalEstimate, remainingWork, completedWork *float64
+
+	// Parse Story Points
+	if v := m.planningInputs[0].Value(); v != "" {
+		var f float64
+		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+			storyPoints = &f
+		}
+	}
+
+	// Parse Original Estimate
+	if v := m.planningInputs[1].Value(); v != "" {
+		var f float64
+		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+			originalEstimate = &f
+		}
+	}
+
+	// Parse Remaining Work
+	if v := m.planningInputs[2].Value(); v != "" {
+		var f float64
+		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+			remainingWork = &f
+		}
+	}
+
+	// Parse Completed Work
+	if v := m.planningInputs[3].Value(); v != "" {
+		var f float64
+		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+			completedWork = &f
+		}
+	}
+
+	// Only update if at least one field has a value
+	if storyPoints == nil && originalEstimate == nil && remainingWork == nil && completedWork == nil {
+		return nil
+	}
+
+	m.loading = true
+	return m.updatePlanning(m.selectedItem.ID, storyPoints, originalEstimate, remainingWork, completedWork)
 }
 
 // getIterationDisplayOrder returns iterations with current iteration first
