@@ -188,10 +188,7 @@ func (m Model) viewBoard() string {
 	if m.loading {
 		b.WriteString("Loading work items...")
 		b.WriteString("\n")
-	} else if m.err != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
-		b.WriteString("\n")
-	} else if len(m.workItems) == 0 {
+	} else if len(m.workItems) == 0 && m.err == nil {
 		b.WriteString("No work items found.")
 		b.WriteString("\n")
 	} else {
@@ -321,6 +318,11 @@ func (m Model) viewBoard() string {
 			}
 			b.WriteString("\n")
 		}
+	}
+
+	if m.err != nil {
+		b.WriteString("\n")
+		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
 	}
 
 	if m.message != "" {
