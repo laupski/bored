@@ -192,8 +192,9 @@ func (m Model) viewBoard() string {
 		b.WriteString("No work items found.")
 		b.WriteString("\n")
 	} else {
-		// Column definitions: ID, Title, Assigned To, State, Area Path, Tags, Comments, Related, Activity Date
+		// Column definitions: ID, Type, Title, Assigned To, State, Area Path, Tags, Comments, Related, Activity Date
 		colID := lipgloss.NewStyle().Width(10).Align(lipgloss.Left).MarginRight(2)
+		colType := lipgloss.NewStyle().Width(12).Align(lipgloss.Left)
 		colTitle := lipgloss.NewStyle().Width(35).Align(lipgloss.Left)
 		colAssigned := lipgloss.NewStyle().Width(25).Align(lipgloss.Left)
 		colState := lipgloss.NewStyle().Width(12).Align(lipgloss.Left)
@@ -207,6 +208,7 @@ func (m Model) viewBoard() string {
 		headerRow := lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			colID.Inherit(headerStyle).Render("ID"),
+			colType.Inherit(headerStyle).Render("Type"),
 			colTitle.Inherit(headerStyle).Render("Title"),
 			colAssigned.Inherit(headerStyle).Render("Assigned To"),
 			colState.Inherit(headerStyle).Render("State"),
@@ -218,7 +220,7 @@ func (m Model) viewBoard() string {
 		)
 		b.WriteString(headerRow)
 		b.WriteString("\n")
-		b.WriteString(strings.Repeat("─", 140))
+		b.WriteString(strings.Repeat("─", 152))
 		b.WriteString("\n")
 
 		// Calculate pagination
@@ -250,6 +252,11 @@ func (m Model) viewBoard() string {
 			wi := m.workItems[i]
 
 			id := fmt.Sprintf("#%d", wi.ID)
+
+			wiType := wi.Fields.WorkItemType
+			if len(wiType) > 11 {
+				wiType = wiType[:8] + "..."
+			}
 
 			title := wi.Fields.Title
 			if len(title) > 34 {
@@ -294,13 +301,14 @@ func (m Model) viewBoard() string {
 			activityDate := ""
 			if wi.Fields.ChangedDate != "" {
 				if t, err := time.Parse(time.RFC3339, wi.Fields.ChangedDate); err == nil {
-					activityDate = t.Format("Jan 02")
+					activityDate = t.Format("Jan 02 '06")
 				}
 			}
 
 			row := lipgloss.JoinHorizontal(
 				lipgloss.Top,
 				colID.Render(id),
+				colType.Render(wiType),
 				colTitle.Render(title),
 				colAssigned.Render(assignedTo),
 				colState.Render(state),

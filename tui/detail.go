@@ -643,7 +643,7 @@ func (m Model) viewDetail() string {
 	}
 	b.WriteString("\n")
 
-	if relatedCount == 0 {
+	if relatedCount == 0 && !m.relatedExpanded {
 		b.WriteString(detailStyle.Render("No parent or child items"))
 		b.WriteString("\n")
 	} else if !m.relatedExpanded {
@@ -693,6 +693,12 @@ func (m Model) viewDetail() string {
 				truncateString(child.Fields.Title, 40),
 				child.Fields.State)
 			b.WriteString(style.Render(childInfo))
+			b.WriteString("\n")
+		}
+
+		// Show message when no related items exist (but section is expanded)
+		if relatedCount == 0 && !m.creatingRelated {
+			b.WriteString(detailStyle.Render("No parent or child items - use ctrl+n to add child or ctrl+p to add parent"))
 			b.WriteString("\n")
 		}
 
