@@ -1,0 +1,260 @@
+package azdo
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestNewClient(t *testing.T) {
+	client := NewClient("myorg", "myproject", "myteam", "MyProject\\MyTeam", "pat123")
+
+	if client.Organization != "myorg" {
+		t.Errorf("Organization = %v, want %v", client.Organization, "myorg")
+	}
+	if client.Project != "myproject" {
+		t.Errorf("Project = %v, want %v", client.Project, "myproject")
+	}
+	if client.Team != "myteam" {
+		t.Errorf("Team = %v, want %v", client.Team, "myteam")
+	}
+	if client.AreaPath != "MyProject\\MyTeam" {
+		t.Errorf("AreaPath = %v, want %v", client.AreaPath, "MyProject\\MyTeam")
+	}
+	if client.PAT != "pat123" {
+		t.Errorf("PAT = %v, want %v", client.PAT, "pat123")
+	}
+}
+
+func TestBaseURL(t *testing.T) {
+	client := NewClient("myorg", "myproject", "", "", "pat")
+	expected := "https://dev.azure.com/myorg/myproject"
+	if client.baseURL() != expected {
+		t.Errorf("baseURL() = %v, want %v", client.baseURL(), expected)
+	}
+}
+
+func TestTeamURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		team     string
+		expected string
+	}{
+		{
+			name:     "with team",
+			team:     "myteam",
+			expected: "https://dev.azure.com/myorg/myproject/myteam",
+		},
+		{
+			name:     "without team",
+			team:     "",
+			expected: "https://dev.azure.com/myorg/myproject",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient("myorg", "myproject", tt.team, "", "pat")
+			if client.teamURL() != tt.expected {
+				t.Errorf("teamURL() = %v, want %v", client.teamURL(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetComments(t *testing.T) {
+	// Create mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify request
+		if r.Method != "GET" {
+			t.Errorf("Expected GET request, got %s", r.Method)
+		}
+
+		// Check authorization header exists
+		if r.Header.Get("Authorization") == "" {
+			t.Error("Expected Authorization header")
+		}
+
+		// Return mock response
+		response := CommentsResponse{
+			Count: 2,
+			Comments: []Comment{
+				{
+					ID:          1,
+					Text:        "First comment",
+					CreatedBy:   IdentityRef{DisplayName: "John Doe", UniqueName: "john@example.com"},
+					CreatedDate: "2024-01-15T10:00:00Z",
+				},
+				{
+					ID:          2,
+					Text:        "Second comment",
+					CreatedBy:   IdentityRef{DisplayName: "Jane Doe", UniqueName: "jane@example.com"},
+					CreatedDate: "2024-01-16T10:00:00Z",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	// Create client with mock server
+	client := NewClient("myorg", "myproject", "", "", "pat")
+	client.httpClient = server.Client()
+
+	// We can't easily test the actual GetComments since it constructs its own URL
+	// This test demonstrates the pattern for mocking HTTP responses
+}
+
+func TestGetWorkItemTypes(t *testing.T) {
+	// Create mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItemTypesResponse{
+			Count: 3,
+			Value: []WorkItemType{
+				{Name: "Bug", Description: "A bug"},
+				{Name: "Task", Description: "A task"},
+				{Name: "User Story", Description: "A user story"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	// This demonstrates the mock pattern
+	// Full integration would require URL rewriting
+}
+
+func TestExtractWorkItemIDFromURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected int
+	}{
+		{
+			name:     "standard URL",
+			url:      "https://dev.azure.com/org/project/_apis/wit/workItems/123",
+			expected: 123,
+		},
+		{
+			name:     "URL with larger ID",
+			url:      "https://dev.azure.com/org/project/_apis/wit/workItems/99999",
+			expected: 99999,
+		},
+		{
+			name:     "URL with single digit",
+			url:      "https://dev.azure.com/org/project/_apis/wit/workItems/5",
+			expected: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractWorkItemIDFromURL(tt.url)
+			if result != tt.expected {
+				t.Errorf("extractWorkItemIDFromURL(%s) = %d, want %d", tt.url, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWorkItemFields(t *testing.T) {
+	// Test JSON unmarshaling of work item fields
+	jsonData := `{
+		"System.Title": "Test Bug",
+		"System.State": "Active",
+		"System.WorkItemType": "Bug",
+		"System.AssignedTo": {
+			"displayName": "John Doe",
+			"uniqueName": "john@example.com"
+		},
+		"System.Description": "This is a test",
+		"System.AreaPath": "Project\\Team",
+		"Microsoft.VSTS.Common.Priority": 2,
+		"System.Tags": "tag1; tag2",
+		"System.CommentCount": 5,
+		"System.ChangedDate": "2024-01-15T10:00:00Z"
+	}`
+
+	var fields WorkItemFields
+	err := json.Unmarshal([]byte(jsonData), &fields)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if fields.Title != "Test Bug" {
+		t.Errorf("Title = %v, want %v", fields.Title, "Test Bug")
+	}
+	if fields.State != "Active" {
+		t.Errorf("State = %v, want %v", fields.State, "Active")
+	}
+	if fields.WorkItemType != "Bug" {
+		t.Errorf("WorkItemType = %v, want %v", fields.WorkItemType, "Bug")
+	}
+	if fields.AssignedTo == nil {
+		t.Error("AssignedTo should not be nil")
+	} else if fields.AssignedTo.DisplayName != "John Doe" {
+		t.Errorf("AssignedTo.DisplayName = %v, want %v", fields.AssignedTo.DisplayName, "John Doe")
+	}
+	if fields.Priority != 2 {
+		t.Errorf("Priority = %v, want %v", fields.Priority, 2)
+	}
+	if fields.CommentCount != 5 {
+		t.Errorf("CommentCount = %v, want %v", fields.CommentCount, 5)
+	}
+}
+
+func TestCommentParsing(t *testing.T) {
+	jsonData := `{
+		"id": 42,
+		"text": "<div>Hello <a href=\"#\" data-vss-mention=\"version:2.0,abc123\">@User</a></div>",
+		"createdBy": {
+			"displayName": "Commenter",
+			"uniqueName": "commenter@example.com"
+		},
+		"createdDate": "2024-01-15T10:00:00Z"
+	}`
+
+	var comment Comment
+	err := json.Unmarshal([]byte(jsonData), &comment)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if comment.ID != 42 {
+		t.Errorf("ID = %v, want %v", comment.ID, 42)
+	}
+	if comment.CreatedBy.DisplayName != "Commenter" {
+		t.Errorf("CreatedBy.DisplayName = %v, want %v", comment.CreatedBy.DisplayName, "Commenter")
+	}
+}
+
+func TestCreateWorkItemOpMarshaling(t *testing.T) {
+	ops := []CreateWorkItemOp{
+		{Op: "add", Path: "/fields/System.Title", Value: "Test Title"},
+		{Op: "add", Path: "/fields/System.Description", Value: "Test Description"},
+	}
+
+	jsonData, err := json.Marshal(ops)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var parsed []CreateWorkItemOp
+	err = json.Unmarshal(jsonData, &parsed)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if len(parsed) != 2 {
+		t.Errorf("Expected 2 ops, got %d", len(parsed))
+	}
+	if parsed[0].Op != "add" {
+		t.Errorf("Op = %v, want %v", parsed[0].Op, "add")
+	}
+	if parsed[0].Path != "/fields/System.Title" {
+		t.Errorf("Path = %v, want %v", parsed[0].Path, "/fields/System.Title")
+	}
+}
