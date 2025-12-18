@@ -51,8 +51,8 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Calculate page info
 		maxVisible := m.height - 12
-		if maxVisible < 5 {
-			maxVisible = 10
+		if m.height == 0 || maxVisible < 1 {
+			maxVisible = 10 // Height not yet initialized
 		}
 		pageSize := maxVisible
 		totalPages := (len(m.workItems) + pageSize - 1) / pageSize
@@ -225,8 +225,8 @@ func (m Model) viewBoard() string {
 
 		// Calculate pagination
 		maxVisible := m.height - 12
-		if maxVisible < 5 {
-			maxVisible = 10
+		if m.height == 0 || maxVisible < 1 {
+			maxVisible = 10 // Height not yet initialized
 		}
 		pageSize := maxVisible
 		totalPages := (len(m.workItems) + pageSize - 1) / pageSize
