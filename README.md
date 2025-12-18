@@ -7,7 +7,7 @@ Main board
 ![](assets/main_board.png)
 
 Creating a new issue
-![](assets/new_item.png)
+![](assets/create_item.png)
 
 Issue details
 ![](assets/detailed_item.png)
