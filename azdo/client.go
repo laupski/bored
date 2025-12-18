@@ -176,6 +176,11 @@ func (c *Client) GetWorkItems(workItemType string, top int) ([]WorkItem, error) 
 }
 
 func (c *Client) GetWorkItemsFiltered(workItemType, assignedTo string, top int) ([]WorkItem, error) {
+	return c.GetWorkItemsPaged(workItemType, assignedTo, top, 0)
+}
+
+// GetWorkItemsPaged fetches work items with pagination support
+func (c *Client) GetWorkItemsPaged(workItemType, assignedTo string, top int, skip int) ([]WorkItem, error) {
 	query := fmt.Sprintf("SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '%s'", c.Project)
 	if workItemType != "" {
 		query += fmt.Sprintf(" AND [System.WorkItemType] = '%s'", workItemType)
@@ -190,7 +195,8 @@ func (c *Client) GetWorkItemsFiltered(workItemType, assignedTo string, top int) 
 
 	// Use team URL for WIQL queries when team is specified - the team context
 	// automatically scopes queries to the team's configured area paths
-	wiqlURL := fmt.Sprintf("%s/_apis/wit/wiql?api-version=7.0&$top=%d", c.teamURL(), top)
+	// Note: WIQL doesn't support $skip directly, so we fetch top+skip and slice
+	wiqlURL := fmt.Sprintf("%s/_apis/wit/wiql?api-version=7.0&$top=%d", c.teamURL(), top+skip)
 
 	body := map[string]string{"query": query}
 	jsonBody, _ := json.Marshal(body)
@@ -222,8 +228,21 @@ func (c *Client) GetWorkItemsFiltered(workItemType, assignedTo string, top int) 
 		return []WorkItem{}, nil
 	}
 
-	ids := make([]string, len(queryResult.WorkItems))
-	for i, wi := range queryResult.WorkItems {
+	// Skip items for pagination
+	workItemRefs := queryResult.WorkItems
+	if skip > 0 && skip < len(workItemRefs) {
+		workItemRefs = workItemRefs[skip:]
+	} else if skip >= len(workItemRefs) {
+		return []WorkItem{}, nil
+	}
+
+	// Limit to top items
+	if len(workItemRefs) > top {
+		workItemRefs = workItemRefs[:top]
+	}
+
+	ids := make([]string, len(workItemRefs))
+	for i, wi := range workItemRefs {
 		ids[i] = fmt.Sprintf("%d", wi.ID)
 	}
 

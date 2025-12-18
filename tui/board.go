@@ -49,46 +49,44 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Calculate page info
-		maxVisible := m.height - 12
-		if m.height == 0 || maxVisible < 1 {
-			maxVisible = 10 // Height not yet initialized
-		}
-		pageSize := maxVisible
-		totalPages := (len(m.workItems) + pageSize - 1) / pageSize
-		if totalPages == 0 {
-			totalPages = 1
-		}
-		currentPage := m.cursor / pageSize
-
 		switch msg.String() {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
 			}
+			return m, nil
 		case "down", "j":
 			if m.cursor < len(m.workItems)-1 {
 				m.cursor++
 			}
+			return m, nil
 		case "left", "h", "pgup":
-			// Previous page
-			if currentPage > 0 {
-				m.cursor = (currentPage - 1) * pageSize
+			// Previous page - fetch from API
+			if m.apiPage > 0 {
+				m.loading = true
+				return m, m.fetchWorkItemsPage(m.apiPage - 1)
 			}
+			return m, nil
 		case "right", "l", "pgdown":
-			// Next page
-			if currentPage < totalPages-1 {
-				m.cursor = (currentPage + 1) * pageSize
-				if m.cursor >= len(m.workItems) {
-					m.cursor = len(m.workItems) - 1
-				}
+			// Next page - fetch from API
+			if m.hasMoreData {
+				m.loading = true
+				return m, m.fetchWorkItemsPage(m.apiPage + 1)
 			}
+			return m, nil
 		case "home":
+			// Go to first page
+			if m.apiPage > 0 {
+				m.loading = true
+				return m, m.fetchWorkItemsPage(0)
+			}
 			m.cursor = 0
+			return m, nil
 		case "end":
 			if len(m.workItems) > 0 {
 				m.cursor = len(m.workItems) - 1
 			}
+			return m, nil
 		case "r":
 			m.loading = true
 			m.err = nil
@@ -241,12 +239,16 @@ func (m Model) viewBoard() string {
 			end = len(m.workItems)
 		}
 
-		// Show page indicator
-		if totalPages > 1 {
-			pageInfo := fmt.Sprintf("Page %d of %d (%d items)", currentPage+1, totalPages, len(m.workItems))
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(pageInfo))
-			b.WriteString("\n\n")
+		// Show page indicator (API page, not local page)
+		pageInfo := fmt.Sprintf("Page %d", m.apiPage+1)
+		if m.hasMoreData {
+			pageInfo += " (more available →)"
+		} else {
+			pageInfo += " (last page)"
 		}
+		pageInfo += fmt.Sprintf(" • %d items", len(m.workItems))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(pageInfo))
+		b.WriteString("\n\n")
 
 		for i := start; i < end; i++ {
 			wi := m.workItems[i]

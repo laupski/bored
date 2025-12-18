@@ -72,6 +72,9 @@ type Model struct {
 	deleteWorkItemID    int    // ID of work item to delete
 	deleteWorkItemTitle string // Title of work item to delete (for confirmation)
 	deleteConfirmInput  string // User's typed confirmation
+	// Server-side pagination state
+	apiPage     int  // Current page of API results (0-indexed)
+	hasMoreData bool // True if there might be more data to fetch
 	// Iteration state
 	iterations        []azdo.Iteration // available iterations
 	iterationExpanded bool             // true when iteration dropdown is shown
@@ -276,6 +279,12 @@ type workItemsMsg struct {
 	err   error
 }
 
+type workItemsPageMsg struct {
+	items []azdo.WorkItem
+	page  int
+	err   error
+}
+
 type createResultMsg struct {
 	item *azdo.WorkItem
 	err  error
@@ -339,6 +348,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.workItems = msg.items
+		m.apiPage = 0
+		m.hasMoreData = len(msg.items) >= m.appConfig.MaxWorkItems
+		m.err = nil
+		m.message = ""
+		return m, nil
+
+	case workItemsPageMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.workItems = msg.items
+		m.apiPage = msg.page
+		m.hasMoreData = len(msg.items) >= m.appConfig.MaxWorkItems
+		m.cursor = 0
 		m.err = nil
 		m.message = ""
 		return m, nil
@@ -507,13 +532,18 @@ func (m Model) View() string {
 }
 
 func (m Model) fetchWorkItems() tea.Cmd {
+	return m.fetchWorkItemsPage(0)
+}
+
+func (m Model) fetchWorkItemsPage(page int) tea.Cmd {
 	return func() tea.Msg {
 		assignedTo := ""
 		if !m.showAll && m.username != "" {
 			assignedTo = m.username
 		}
-		items, err := m.client.GetWorkItemsFiltered("", assignedTo, 50)
-		return workItemsMsg{items: items, err: err}
+		skip := page * m.appConfig.MaxWorkItems
+		items, err := m.client.GetWorkItemsPaged("", assignedTo, m.appConfig.MaxWorkItems, skip)
+		return workItemsPageMsg{items: items, page: page, err: err}
 	}
 }
 
