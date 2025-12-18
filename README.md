@@ -65,4 +65,4 @@ See [releases](https://github.com/laupski/bored/releases) for more info.
 
 ## License
 
-[Apache 2.0](https://github.com/laupski/bored/raw/main/LICENSE)
+[Apache 2.0](./LICENSE)
