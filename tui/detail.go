@@ -869,8 +869,16 @@ func (m Model) viewDetail() string {
 			}
 			// Extract PR number from URL if it's a GitHub PR
 			displayURL := link.URL
-			if strings.Contains(link.URL, "github.com") && strings.Contains(link.URL, "/pull/") {
-				// Try to extract PR number
+			// Handle vstfs:///GitHub/PullRequest/{guid}%2F{pr-number} format
+			if strings.HasPrefix(link.URL, "vstfs:///GitHub/PullRequest/") {
+				// Extract PR number from vstfs URL
+				parts := strings.Split(link.URL, "%2F")
+				if len(parts) == 2 {
+					prNum := parts[1]
+					displayURL = fmt.Sprintf("GitHub PR #%s", prNum)
+				}
+			} else if strings.Contains(link.URL, "github.com") && strings.Contains(link.URL, "/pull/") {
+				// Handle regular github.com URLs
 				parts := strings.Split(link.URL, "/pull/")
 				if len(parts) == 2 {
 					prNum := strings.Split(parts[1], "/")[0]

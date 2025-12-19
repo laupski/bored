@@ -1108,14 +1108,24 @@ func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
 func (c *Client) AddHyperlink(workItemID int, url string, comment string) error {
 	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
 
-	linkValue := map[string]interface{}{
-		"rel": "ArtifactLink",
-		"url": url,
+	// ArtifactLink requires a "name" attribute
+	// Use comment as name if provided, otherwise derive from URL
+	name := comment
+	if name == "" {
+		name = url
+	}
+
+	attributes := map[string]interface{}{
+		"name": name,
 	}
 	if comment != "" {
-		linkValue["attributes"] = map[string]interface{}{
-			"comment": comment,
-		}
+		attributes["comment"] = comment
+	}
+
+	linkValue := map[string]interface{}{
+		"rel":        "ArtifactLink",
+		"url":        url,
+		"attributes": attributes,
 	}
 
 	ops := []CreateWorkItemOp{
