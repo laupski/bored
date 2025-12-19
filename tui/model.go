@@ -63,6 +63,14 @@ type Model struct {
 	childItems      []azdo.WorkItem
 	relatedExpanded bool
 	relatedCursor   int // 0 = parent, 1+ = children
+	// Hyperlinks (external links like GitHub PRs)
+	hyperlinks         []azdo.Hyperlink
+	hyperlinksExpanded bool
+	hyperlinkCursor    int
+	addingHyperlink    bool   // true when in add hyperlink mode
+	hyperlinkURL       string // URL being entered
+	hyperlinkComment   string // Comment being entered
+	hyperlinkFocus     int    // 0 = URL, 1 = Comment
 	// Create related item state
 	creatingRelated       bool   // true when in create related item mode
 	createRelatedAsChild  bool   // true = create child, false = create parent
@@ -341,6 +349,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commentsExpanded = false
 				m.relatedExpanded = false
 				m.iterationExpanded = false
+				m.hyperlinksExpanded = false
 				return m, nil
 			}
 		}
@@ -560,6 +569,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updatePlanningInputsFromWorkItemDynamic()
 		}
 		return m, nil
+
+	case hyperlinksMsg:
+		if msg.err == nil {
+			m.hyperlinks = msg.hyperlinks
+		}
+		return m, nil
+
+	case addHyperlinkMsg:
+		m.loading = false
+		m.addingHyperlink = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.message = "Hyperlink added"
+		m.hyperlinkURL = ""
+		m.hyperlinkComment = ""
+		// Refresh hyperlinks
+		return m, m.fetchHyperlinks(m.selectedItem.ID)
+
+	case removeHyperlinkMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.message = "Hyperlink removed"
+		m.hyperlinkCursor = 0
+		// Refresh hyperlinks
+		return m, m.fetchHyperlinks(m.selectedItem.ID)
 	}
 
 	switch m.view {
@@ -694,6 +733,19 @@ type updatePlanningMsg struct {
 type planningFieldsMsg struct {
 	fields []azdo.PlanningField
 	err    error
+}
+
+type hyperlinksMsg struct {
+	hyperlinks []azdo.Hyperlink
+	err        error
+}
+
+type addHyperlinkMsg struct {
+	err error
+}
+
+type removeHyperlinkMsg struct {
+	err error
 }
 
 func (m Model) fetchComments(workItemID int) tea.Cmd {
@@ -847,6 +899,27 @@ func (m *Model) updatePlanningInputsFromWorkItemDynamic() {
 		} else {
 			m.planningInputs[i].SetValue("")
 		}
+	}
+}
+
+func (m Model) fetchHyperlinks(workItemID int) tea.Cmd {
+	return func() tea.Msg {
+		hyperlinks, err := m.client.GetHyperlinks(workItemID)
+		return hyperlinksMsg{hyperlinks: hyperlinks, err: err}
+	}
+}
+
+func (m Model) addHyperlink(workItemID int, url string, comment string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.client.AddHyperlink(workItemID, url, comment)
+		return addHyperlinkMsg{err: err}
+	}
+}
+
+func (m Model) removeHyperlink(workItemID int, url string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.client.RemoveHyperlink(workItemID, url)
+		return removeHyperlinkMsg{err: err}
 	}
 }
 

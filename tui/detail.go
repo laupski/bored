@@ -249,9 +249,54 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Handle add hyperlink mode input
+		if m.addingHyperlink {
+			switch msg.String() {
+			case "esc":
+				m.addingHyperlink = false
+				m.hyperlinkURL = ""
+				m.hyperlinkComment = ""
+				return m, nil
+			case "enter":
+				if m.hyperlinkURL != "" {
+					m.loading = true
+					m.addingHyperlink = false
+					return m, m.addHyperlink(m.selectedItem.ID, m.hyperlinkURL, m.hyperlinkComment)
+				}
+				return m, nil
+			case "tab":
+				// Toggle between URL and comment fields
+				m.hyperlinkFocus = (m.hyperlinkFocus + 1) % 2
+				return m, nil
+			case "backspace":
+				if m.hyperlinkFocus == 0 && len(m.hyperlinkURL) > 0 {
+					m.hyperlinkURL = m.hyperlinkURL[:len(m.hyperlinkURL)-1]
+				} else if m.hyperlinkFocus == 1 && len(m.hyperlinkComment) > 0 {
+					m.hyperlinkComment = m.hyperlinkComment[:len(m.hyperlinkComment)-1]
+				}
+				return m, nil
+			default:
+				// Add character to the focused field
+				if len(msg.String()) == 1 {
+					if m.hyperlinkFocus == 0 {
+						m.hyperlinkURL += msg.String()
+					} else {
+						m.hyperlinkComment += msg.String()
+					}
+				} else if msg.String() == "space" {
+					if m.hyperlinkFocus == 0 {
+						m.hyperlinkURL += " "
+					} else {
+						m.hyperlinkComment += " "
+					}
+				}
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "tab", "down":
-			if !m.commentsExpanded && !m.relatedExpanded {
+			if !m.commentsExpanded && !m.relatedExpanded && !m.hyperlinksExpanded {
 				m.detailFocus = (m.detailFocus + 1) % len(m.detailInputs)
 				return m, m.updateDetailFocus()
 			} else if m.relatedExpanded {
@@ -263,10 +308,15 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if maxCursor > 0 {
 					m.relatedCursor = (m.relatedCursor + 1) % maxCursor
 				}
+			} else if m.hyperlinksExpanded {
+				// Navigate through hyperlinks
+				if len(m.hyperlinks) > 0 {
+					m.hyperlinkCursor = (m.hyperlinkCursor + 1) % len(m.hyperlinks)
+				}
 			}
 			return m, nil
 		case "shift+tab", "up":
-			if !m.commentsExpanded && !m.relatedExpanded {
+			if !m.commentsExpanded && !m.relatedExpanded && !m.hyperlinksExpanded {
 				m.detailFocus--
 				if m.detailFocus < 0 {
 					m.detailFocus = len(m.detailInputs) - 1
@@ -282,6 +332,14 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.relatedCursor--
 					if m.relatedCursor < 0 {
 						m.relatedCursor = maxCursor - 1
+					}
+				}
+			} else if m.hyperlinksExpanded {
+				// Navigate through hyperlinks
+				if len(m.hyperlinks) > 0 {
+					m.hyperlinkCursor--
+					if m.hyperlinkCursor < 0 {
+						m.hyperlinkCursor = len(m.hyperlinks) - 1
 					}
 				}
 			}
@@ -326,6 +384,8 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.relatedExpanded {
 				m.commentsExpanded = false
 				m.iterationExpanded = false
+				m.hyperlinksExpanded = false
+				m.planningExpanded = false
 			}
 			return m, nil
 		case "d", "delete":
@@ -355,6 +415,10 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.confirmDeleteIsParent = isParent
 				}
 				return m, nil
+			} else if m.hyperlinksExpanded && !m.addingHyperlink && m.hyperlinkCursor < len(m.hyperlinks) {
+				// Remove the selected hyperlink
+				m.loading = true
+				return m, m.removeHyperlink(m.selectedItem.ID, m.hyperlinks[m.hyperlinkCursor].URL)
 			}
 		case "y":
 			// Confirm delete (only when confirming)
@@ -377,6 +441,8 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.commentsExpanded {
 				m.relatedExpanded = false
 				m.iterationExpanded = false
+				m.hyperlinksExpanded = false
+				m.planningExpanded = false
 			}
 			return m, nil
 		case "ctrl+n":
@@ -416,6 +482,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commentsExpanded = false
 				m.relatedExpanded = false
 				m.planningExpanded = false
+				m.hyperlinksExpanded = false
 				// Find current iteration in list to set cursor
 				for i, iter := range m.iterations {
 					if iter.Path == m.selectedItem.Fields.IterationPath {
@@ -431,6 +498,27 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.iterationExpanded = false
 			}
 			return m, nil
+		case "ctrl+l":
+			// Toggle hyperlinks section (ctrl+l for Links/PRs)
+			m.hyperlinksExpanded = !m.hyperlinksExpanded
+			m.hyperlinkCursor = 0
+			// Auto-collapse other sections
+			if m.hyperlinksExpanded {
+				m.commentsExpanded = false
+				m.relatedExpanded = false
+				m.iterationExpanded = false
+				m.planningExpanded = false
+			}
+			return m, nil
+		case "a":
+			// Add hyperlink when in hyperlinks expanded mode (only when not in any input mode)
+			if m.hyperlinksExpanded && !m.addingHyperlink && !m.creatingRelated && !m.confirmingDelete {
+				m.addingHyperlink = true
+				m.hyperlinkURL = ""
+				m.hyperlinkComment = ""
+				m.hyperlinkFocus = 0
+			}
+			return m, nil
 		case "ctrl+g":
 			// Toggle planning section (ctrl+g for planning Goals/estimates)
 			if !m.planningExpanded {
@@ -440,6 +528,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commentsExpanded = false
 				m.relatedExpanded = false
 				m.iterationExpanded = false
+				m.hyperlinksExpanded = false
 				// Fetch available planning fields for this work item type
 				// and load current values into inputs
 				if m.selectedItem != nil {
@@ -504,12 +593,15 @@ func (m Model) navigateToWorkItem(wi *azdo.WorkItem) (tea.Model, tea.Cmd) {
 	m.commentScroll = 0
 	m.iterationExpanded = false
 	m.iterationCursor = 0
+	m.hyperlinks = nil
+	m.hyperlinksExpanded = false
+	m.hyperlinkCursor = 0
 	m.detailFocus = 0
 	m.err = nil
 	m.message = ""
 
-	// Fetch comments and related items for the new work item
-	return m, tea.Batch(m.fetchComments(wi.ID), m.fetchRelatedItems(wi.ID))
+	// Fetch comments, related items, and hyperlinks for the new work item
+	return m, tea.Batch(m.fetchComments(wi.ID), m.fetchRelatedItems(wi.ID), m.fetchHyperlinks(wi.ID))
 }
 
 func (m Model) viewDetail() string {
@@ -735,6 +827,93 @@ func (m Model) viewDetail() string {
 	}
 	b.WriteString("\n")
 
+	// Hyperlinks section (External links like GitHub PRs)
+	hyperlinkHeaderStyle := labelStyle
+	if m.hyperlinksExpanded {
+		hyperlinkHeaderStyle = hyperlinkHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
+	}
+
+	hyperlinkCount := len(m.hyperlinks)
+
+	if m.hyperlinksExpanded {
+		b.WriteString(hyperlinkHeaderStyle.Render(fmt.Sprintf("▼ Pull Requests / Links (%d)", hyperlinkCount)))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+l: collapse, ↑↓: select, a: add, d: delete)"))
+	} else {
+		b.WriteString(labelStyle.Render(fmt.Sprintf("▶ Pull Requests / Links (%d)", hyperlinkCount)))
+		b.WriteString(" ")
+		b.WriteString(hintStyle.Render("(ctrl+l: expand)"))
+	}
+	b.WriteString("\n")
+
+	if hyperlinkCount == 0 && !m.hyperlinksExpanded {
+		b.WriteString(detailStyle.Render("No linked PRs"))
+		b.WriteString("\n")
+	} else if !m.hyperlinksExpanded {
+		// Collapsed: show summary
+		b.WriteString(detailStyle.Render(fmt.Sprintf("%d linked item(s)", hyperlinkCount)))
+		b.WriteString("\n")
+	} else {
+		// Expanded: show all hyperlinks
+		hyperlinkItemStyle := lipgloss.NewStyle().
+			Padding(0, 1)
+		selectedHyperlinkStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("229")).
+			Background(lipgloss.Color("57")).
+			Padding(0, 1)
+
+		for i, link := range m.hyperlinks {
+			style := hyperlinkItemStyle
+			if m.hyperlinkCursor == i {
+				style = selectedHyperlinkStyle
+			}
+			// Extract PR number from URL if it's a GitHub PR
+			displayURL := link.URL
+			if strings.Contains(link.URL, "github.com") && strings.Contains(link.URL, "/pull/") {
+				// Try to extract PR number
+				parts := strings.Split(link.URL, "/pull/")
+				if len(parts) == 2 {
+					prNum := strings.Split(parts[1], "/")[0]
+					displayURL = fmt.Sprintf("GitHub PR #%s", prNum)
+				}
+			}
+			linkInfo := fmt.Sprintf("🔗 %s", displayURL)
+			if link.Comment != "" {
+				linkInfo = fmt.Sprintf("🔗 %s - %s", displayURL, link.Comment)
+			}
+			b.WriteString(style.Render(linkInfo))
+			b.WriteString("\n")
+		}
+
+		// Show message when no hyperlinks exist (but section is expanded)
+		if hyperlinkCount == 0 && !m.addingHyperlink {
+			b.WriteString(detailStyle.Render("No linked PRs - press 'a' to add a link"))
+			b.WriteString("\n")
+		}
+
+		// Show add hyperlink form if active
+		if m.addingHyperlink {
+			b.WriteString("\n")
+			addFormStyle := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("39")).
+				Padding(0, 1)
+			// Show cursor indicator on focused field
+			urlCursor := ""
+			commentCursor := ""
+			if m.hyperlinkFocus == 0 {
+				urlCursor = "_"
+			} else {
+				commentCursor = "_"
+			}
+			formContent := fmt.Sprintf("Add External Link\nURL: %s%s\nComment (optional): %s%s\n\ntab: switch field • enter: save • esc: cancel",
+				m.hyperlinkURL, urlCursor, m.hyperlinkComment, commentCursor)
+			b.WriteString(addFormStyle.Render(formContent))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
+
 	// Comments section
 	commentHeaderStyle := labelStyle
 	if m.commentsExpanded {
@@ -895,6 +1074,10 @@ func (m Model) viewDetail() string {
 		b.WriteString(helpStyle.Render("ctrl+e: collapse comments • ctrl+n/p: scroll • esc: back"))
 	} else if m.iterationExpanded {
 		b.WriteString(helpStyle.Render("ctrl+t: collapse • ↑↓: select • enter: set iteration • esc: back"))
+	} else if m.addingHyperlink {
+		b.WriteString(helpStyle.Render("type URL • tab: switch field • enter: save • esc: cancel"))
+	} else if m.hyperlinksExpanded {
+		b.WriteString(helpStyle.Render("ctrl+l: collapse • a: add link • d: delete • ↑↓: select • esc: back"))
 	} else if m.creatingRelated {
 		b.WriteString(helpStyle.Render("type title • ←/→: change type • enter: create • esc: cancel"))
 	} else if m.confirmingDelete {
@@ -907,7 +1090,7 @@ func (m Model) viewDetail() string {
 	} else if m.planningExpanded {
 		b.WriteString(helpStyle.Render("ctrl+g: collapse • ↑↓: navigate • enter: save • esc: back"))
 	} else {
-		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • ctrl+t: iteration • ctrl+e: comments • ctrl+r: related • ctrl+g: planning • esc: back"))
+		b.WriteString(helpStyle.Render("tab/↑↓: navigate • ctrl+s: save • ctrl+t: iteration • ctrl+e: comments • ctrl+r: related • ctrl+l: PRs • ctrl+g: planning • esc: back"))
 	}
 
 	return boxStyle.Render(b.String())

@@ -34,6 +34,12 @@ type WorkItemRelation struct {
 	Attributes map[string]interface{} `json:"attributes"`
 }
 
+// Hyperlink represents an external link (e.g., GitHub PR, documentation)
+type Hyperlink struct {
+	URL     string // The external URL
+	Comment string // Optional description/comment
+}
+
 type WorkItemFields struct {
 	Title         string       `json:"System.Title"`
 	State         string       `json:"System.State"`
@@ -1070,4 +1076,93 @@ func (c *Client) UpdateWorkItemIteration(workItemID int, iterationPath string) (
 	}
 
 	return &workItem, nil
+}
+
+// GetHyperlinks extracts hyperlinks (external links) from a work item's relations
+func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
+	wi, err := c.GetWorkItemWithRelations(workItemID)
+	if err != nil {
+		return nil, err
+	}
+
+	var hyperlinks []Hyperlink
+	for _, rel := range wi.Relations {
+		if rel.Rel == "Hyperlink" {
+			comment := ""
+			if rel.Attributes != nil {
+				if c, ok := rel.Attributes["comment"].(string); ok {
+					comment = c
+				}
+			}
+			hyperlinks = append(hyperlinks, Hyperlink{
+				URL:     rel.URL,
+				Comment: comment,
+			})
+		}
+	}
+
+	return hyperlinks, nil
+}
+
+// AddHyperlink adds an external link (hyperlink) to a work item
+func (c *Client) AddHyperlink(workItemID int, url string, comment string) error {
+	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	linkValue := map[string]interface{}{
+		"rel": "Hyperlink",
+		"url": url,
+	}
+	if comment != "" {
+		linkValue["attributes"] = map[string]interface{}{
+			"comment": comment,
+		}
+	}
+
+	ops := []CreateWorkItemOp{
+		{
+			Op:    "add",
+			Path:  "/relations/-",
+			Value: linkValue,
+		},
+	}
+
+	jsonBody, _ := json.Marshal(ops)
+
+	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// RemoveHyperlink removes a hyperlink from a work item by URL
+func (c *Client) RemoveHyperlink(workItemID int, url string) error {
+	// Get the work item with relations to find the index
+	wi, err := c.GetWorkItemWithRelations(workItemID)
+	if err != nil {
+		return err
+	}
+
+	// Find the relation index for the hyperlink with matching URL
+	for i, rel := range wi.Relations {
+		if rel.Rel == "Hyperlink" && rel.URL == url {
+			return c.RemoveRelation(workItemID, i)
+		}
+	}
+
+	return fmt.Errorf("hyperlink not found")
 }
