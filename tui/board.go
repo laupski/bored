@@ -136,9 +136,12 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commentScroll = 0
 				m.iterationExpanded = false
 				m.iterationCursor = 0
+				m.hyperlinks = nil
+				m.hyperlinksExpanded = false
+				m.hyperlinkCursor = 0
 				m.err = nil
 				m.message = ""
-				return m, tea.Batch(m.fetchComments(wi.ID), m.fetchRelatedItems(wi.ID))
+				return m, tea.Batch(m.fetchComments(wi.ID), m.fetchRelatedItems(wi.ID), m.fetchHyperlinks(wi.ID))
 			}
 			return m, nil
 		case "c", "n":
