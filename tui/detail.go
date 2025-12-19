@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/laupski/bored/azdo"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -132,17 +133,6 @@ func stripHTMLTags(text string, orgURL string) string {
 
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.PasteMsg:
-		// Handle paste events when adding hyperlink
-		if m.addingHyperlink {
-			pasteStr := string(msg)
-			if m.hyperlinkFocus == 0 {
-				m.hyperlinkURL += pasteStr
-			} else {
-				m.hyperlinkComment += pasteStr
-			}
-		}
-		return m, nil
 	case tea.KeyMsg:
 		// Handle planning edit mode
 		if m.planningExpanded {
@@ -284,6 +274,15 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.hyperlinkURL = m.hyperlinkURL[:len(m.hyperlinkURL)-1]
 				} else if m.hyperlinkFocus == 1 && len(m.hyperlinkComment) > 0 {
 					m.hyperlinkComment = m.hyperlinkComment[:len(m.hyperlinkComment)-1]
+				}
+				return m, nil
+			case "ctrl+v", "super+v", "alt+v":
+				if content, err := clipboard.ReadAll(); err == nil {
+					if m.hyperlinkFocus == 0 {
+						m.hyperlinkURL += content
+					} else {
+						m.hyperlinkComment += content
+					}
 				}
 				return m, nil
 			default:
