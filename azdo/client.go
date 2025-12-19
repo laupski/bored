@@ -34,6 +34,13 @@ type WorkItemRelation struct {
 	Attributes map[string]interface{} `json:"attributes"`
 }
 
+// Hyperlink represents an external link (e.g., GitHub PR, documentation)
+type Hyperlink struct {
+	URL     string // The external URL (may be vstfs:// or https://)
+	Name    string // The name/title of the link (often the original GitHub URL)
+	Comment string // Optional description/comment
+}
+
 type WorkItemFields struct {
 	Title         string       `json:"System.Title"`
 	State         string       `json:"System.State"`
@@ -1070,4 +1077,124 @@ func (c *Client) UpdateWorkItemIteration(workItemID int, iterationPath string) (
 	}
 
 	return &workItem, nil
+}
+
+// GetHyperlinks extracts hyperlinks (external links) from a work item's relations
+func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
+	wi, err := c.GetWorkItemWithRelations(workItemID)
+	if err != nil {
+		return nil, err
+	}
+
+	var hyperlinks []Hyperlink
+	for _, rel := range wi.Relations {
+		if rel.Rel == "ArtifactLink" || rel.Rel == "Hyperlink" {
+			name := ""
+			comment := ""
+			if rel.Attributes != nil {
+				if n, ok := rel.Attributes["name"].(string); ok {
+					name = n
+				}
+				if c, ok := rel.Attributes["comment"].(string); ok {
+					comment = c
+				}
+			}
+			hyperlinks = append(hyperlinks, Hyperlink{
+				URL:     rel.URL,
+				Name:    name,
+				Comment: comment,
+			})
+		}
+	}
+
+	return hyperlinks, nil
+}
+
+// AddHyperlink adds a hyperlink to a work item
+// Validates URL format and enforces length limits before adding
+func (c *Client) AddHyperlink(workItemID int, urlStr string, comment string) error {
+	// Validate URL format
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Validate URL scheme (only http/https allowed)
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("invalid URL scheme: only http and https are allowed")
+	}
+
+	// Validate URL length (max 2048 characters)
+	if len(urlStr) > 2048 {
+		return fmt.Errorf("URL too long: maximum length is 2048 characters")
+	}
+
+	// Validate comment length (max 500 characters)
+	if len(comment) > 500 {
+		return fmt.Errorf("comment too long: maximum length is 500 characters")
+	}
+
+	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	attributes := map[string]interface{}{}
+	if comment != "" {
+		attributes["comment"] = comment
+	}
+
+	linkValue := map[string]interface{}{
+		"rel":        "Hyperlink",
+		"url":        urlStr,
+		"attributes": attributes,
+	}
+
+	ops := []CreateWorkItemOp{
+		{
+			Op:    "add",
+			Path:  "/relations/-",
+			Value: linkValue,
+		},
+	}
+
+	jsonBody, err := json.Marshal(ops)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	req.Header.Set("Content-Type", "application/json-patch+json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// RemoveHyperlink removes a hyperlink from a work item by URL
+func (c *Client) RemoveHyperlink(workItemID int, url string) error {
+	// Get the work item with relations to find the index
+	wi, err := c.GetWorkItemWithRelations(workItemID)
+	if err != nil {
+		return err
+	}
+
+	// Find the relation index for the hyperlink with matching URL
+	for i, rel := range wi.Relations {
+		if (rel.Rel == "ArtifactLink" || rel.Rel == "Hyperlink") && rel.URL == url {
+			return c.RemoveRelation(workItemID, i)
+		}
+	}
+
+	return fmt.Errorf("hyperlink %s not found in work item %d", url, workItemID)
 }
