@@ -36,8 +36,22 @@ type WorkItemRelation struct {
 
 // Hyperlink represents an external link (e.g., GitHub PR, documentation)
 type Hyperlink struct {
-	URL     string // The external URL
+	URL     string // The external URL (may be vstfs:// or https://)
+	Name    string // The name/title of the link (often the original GitHub URL)
 	Comment string // Optional description/comment
+}
+
+// ServiceEndpoint represents a service connection (e.g., GitHub)
+type ServiceEndpoint struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// ServiceEndpointsResponse represents the response from service endpoints API
+type ServiceEndpointsResponse struct {
+	Count int               `json:"count"`
+	Value []ServiceEndpoint `json:"value"`
 }
 
 type WorkItemFields struct {
@@ -1078,6 +1092,42 @@ func (c *Client) UpdateWorkItemIteration(workItemID int, iterationPath string) (
 	return &workItem, nil
 }
 
+// GetGitHubConnection retrieves the GitHub service endpoint connection ID
+func (c *Client) GetGitHubConnection() (string, error) {
+	endpointsURL := fmt.Sprintf("https://dev.azure.com/%s/%s/_apis/serviceendpoint/endpoints?api-version=7.0", c.Organization, c.Project)
+
+	req, err := http.NewRequest("GET", endpointsURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result ServiceEndpointsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	// Find the GitHub endpoint
+	for _, endpoint := range result.Value {
+		if endpoint.Type == "github" {
+			return endpoint.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("no GitHub service connection found")
+}
+
 // GetHyperlinks extracts hyperlinks (external links) from a work item's relations
 func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
 	wi, err := c.GetWorkItemWithRelations(workItemID)
@@ -1088,14 +1138,19 @@ func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
 	var hyperlinks []Hyperlink
 	for _, rel := range wi.Relations {
 		if rel.Rel == "ArtifactLink" {
+			name := ""
 			comment := ""
 			if rel.Attributes != nil {
+				if n, ok := rel.Attributes["name"].(string); ok {
+					name = n
+				}
 				if c, ok := rel.Attributes["comment"].(string); ok {
 					comment = c
 				}
 			}
 			hyperlinks = append(hyperlinks, Hyperlink{
 				URL:     rel.URL,
+				Name:    name,
 				Comment: comment,
 			})
 		}
@@ -1105,14 +1160,40 @@ func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
 }
 
 // AddHyperlink adds an external link (hyperlink) to a work item
-func (c *Client) AddHyperlink(workItemID int, url string, comment string) error {
+// For GitHub URLs, converts them to vstfs:// format for ArtifactLink
+func (c *Client) AddHyperlink(workItemID int, urlStr string, comment string) error {
 	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
+
+	// Convert GitHub PR URLs to vstfs format for ArtifactLink
+	finalURL := urlStr
+	if strings.Contains(urlStr, "github.com") && strings.Contains(urlStr, "/pull/") {
+		// Parse GitHub URL to extract PR number
+		// Expected format: https://github.com/owner/repo/pull/123
+		parts := strings.Split(urlStr, "/")
+		if len(parts) >= 7 {
+			// Get GitHub connection GUID
+			connectionID, err := c.GetGitHubConnection()
+			if err != nil {
+				return fmt.Errorf("failed to get GitHub connection: %w", err)
+			}
+
+			// Extract PR number
+			prNumber := parts[len(parts)-1]
+			// Remove any query params or fragments
+			if idx := strings.IndexAny(prNumber, "?#"); idx != -1 {
+				prNumber = prNumber[:idx]
+			}
+
+			// Convert to vstfs format
+			finalURL = fmt.Sprintf("vstfs:///GitHub/PullRequest/%s%%2F%s", connectionID, prNumber)
+		}
+	}
 
 	// ArtifactLink requires a "name" attribute
 	// Use comment as name if provided, otherwise derive from URL
 	name := comment
 	if name == "" {
-		name = url
+		name = urlStr // Use original URL for name, not vstfs URL
 	}
 
 	attributes := map[string]interface{}{
@@ -1124,7 +1205,7 @@ func (c *Client) AddHyperlink(workItemID int, url string, comment string) error 
 
 	linkValue := map[string]interface{}{
 		"rel":        "ArtifactLink",
-		"url":        url,
+		"url":        finalURL,
 		"attributes": attributes,
 	}
 
@@ -1136,7 +1217,10 @@ func (c *Client) AddHyperlink(workItemID int, url string, comment string) error 
 		},
 	}
 
-	jsonBody, _ := json.Marshal(ops)
+	jsonBody, err := json.Marshal(ops)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
 
 	req, err := http.NewRequest("PATCH", updateURL, bytes.NewBuffer(jsonBody))
 	if err != nil {

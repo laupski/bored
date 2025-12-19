@@ -132,6 +132,17 @@ func stripHTMLTags(text string, orgURL string) string {
 
 func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		// Handle paste events when adding hyperlink
+		if m.addingHyperlink {
+			pasteStr := string(msg)
+			if m.hyperlinkFocus == 0 {
+				m.hyperlinkURL += pasteStr
+			} else {
+				m.hyperlinkComment += pasteStr
+			}
+		}
+		return m, nil
 	case tea.KeyMsg:
 		// Handle planning edit mode
 		if m.planningExpanded {
@@ -869,20 +880,25 @@ func (m Model) viewDetail() string {
 			}
 			// Extract PR number from URL if it's a GitHub PR
 			displayURL := link.URL
-			// Handle vstfs:///GitHub/PullRequest/{guid}%2F{pr-number} format
-			if strings.HasPrefix(link.URL, "vstfs:///GitHub/PullRequest/") {
-				// Extract PR number from vstfs URL
-				parts := strings.Split(link.URL, "%2F")
-				if len(parts) == 2 {
-					prNum := parts[1]
-					displayURL = fmt.Sprintf("GitHub PR #%s", prNum)
-				}
-			} else if strings.Contains(link.URL, "github.com") && strings.Contains(link.URL, "/pull/") {
-				// Handle regular github.com URLs
-				parts := strings.Split(link.URL, "/pull/")
-				if len(parts) == 2 {
-					prNum := strings.Split(parts[1], "/")[0]
-					displayURL = fmt.Sprintf("GitHub PR #%s", prNum)
+			// For vstfs URLs, use the Name attribute which contains the original GitHub URL
+			githubURL := link.URL
+			if strings.HasPrefix(link.URL, "vstfs:///GitHub/PullRequest/") && link.Name != "" {
+				githubURL = link.Name
+			}
+
+			// Parse GitHub URL to show owner/repo#PR format
+			if strings.Contains(githubURL, "github.com") && strings.Contains(githubURL, "/pull/") {
+				// Expected format: https://github.com/owner/repo/pull/123
+				parts := strings.Split(githubURL, "/")
+				if len(parts) >= 7 {
+					owner := parts[3]
+					repo := parts[4]
+					prNum := parts[len(parts)-1]
+					// Remove any query params or fragments
+					if idx := strings.IndexAny(prNum, "?#"); idx != -1 {
+						prNum = prNum[:idx]
+					}
+					displayURL = fmt.Sprintf("%s/%s#%s", owner, repo, prNum)
 				}
 			}
 			linkInfo := fmt.Sprintf("🔗 %s", displayURL)
