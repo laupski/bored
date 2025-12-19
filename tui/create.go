@@ -76,7 +76,7 @@ func (m Model) viewCreate() string {
 	for i, label := range labels {
 		style := labelStyle
 		if i == m.createFocus {
-			style = style.Copy().Foreground(lipgloss.Color("229"))
+			style = style.Foreground(lipgloss.Color("229"))
 		}
 		b.WriteString(style.Render(label))
 		b.WriteString("\n")
@@ -86,7 +86,7 @@ func (m Model) viewCreate() string {
 
 	typeLabel := labelStyle
 	if m.createFocus == len(m.createInputs) {
-		typeLabel = typeLabel.Copy().Foreground(lipgloss.Color("229"))
+		typeLabel = typeLabel.Foreground(lipgloss.Color("229"))
 	}
 	b.WriteString(typeLabel.Render("Type"))
 	b.WriteString("\n")

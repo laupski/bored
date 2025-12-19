@@ -32,8 +32,12 @@ tidy:
 vet:
     go vet ./...
 
-# Run all checks (fmt, vet, test)
-check: fmt vet test
+# Run golangci-lint for static analysis
+lint:
+    golangci-lint run
+
+# Run all checks (fmt, vet, lint, test)
+check: fmt vet lint test
 
 # Clean build artifacts
 clean:

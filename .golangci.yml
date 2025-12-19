@@ -1,0 +1,43 @@
+# golangci-lint configuration
+# https://golangci-lint.run/usage/configuration/
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # These are enabled by default: errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - misspell      # Find misspellings
+    - unconvert     # Remove unnecessary conversions
+    - unparam       # Find unused function parameters
+    - gosec         # Security checks
+    - bodyclose     # Check HTTP response body is closed
+    - nilerr        # Check err is not nil before returning nil
+    - errorlint     # Find issues with error wrapping
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # Too noisy for TUI code
+    gosec:
+      excludes:
+        - G104  # Audit errors not checked (covered by errcheck)
+  exclusions:
+    rules:
+      # Test files can have longer functions and more complexity
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+          - errcheck
+          - govet
+
+formatters:
+  enable:
+    - gofmt         # Check formatting
+    - goimports     # Check import ordering

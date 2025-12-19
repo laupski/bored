@@ -212,7 +212,7 @@ func (c *Client) GetWorkItemsPaged(workItemType, assignedTo string, top int, ski
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -274,7 +274,7 @@ func (c *Client) getWorkItemsByIDs(ids []string) ([]WorkItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -325,7 +325,7 @@ func (c *Client) CreateWorkItemWithAssignee(workItemType, title, description str
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -389,7 +389,7 @@ func (c *Client) CreateWorkItemWithParentAndAssignee(workItemType, title, descri
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -433,7 +433,7 @@ func (c *Client) AddChildLink(parentID, childID int) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -467,7 +467,7 @@ func (c *Client) RemoveRelation(workItemID int, relationIndex int) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -516,7 +516,7 @@ func (c *Client) GetWorkItemTypes() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -553,7 +553,7 @@ func (c *Client) GetComments(workItemID int) ([]Comment, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -585,7 +585,7 @@ func (c *Client) AddComment(workItemID int, text string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -627,7 +627,7 @@ func (c *Client) UpdateWorkItem(workItemID int, title, state, assignedTo, tags s
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -656,7 +656,7 @@ func (c *Client) GetWorkItemWithRelations(workItemID int) (*WorkItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -724,14 +724,16 @@ func (c *Client) GetRelatedWorkItems(workItemID int) (parent *WorkItem, children
 func extractWorkItemIDFromURL(urlStr string) int {
 	// Parse the URL and get the last path segment
 	var id int
-	fmt.Sscanf(urlStr[len(urlStr)-10:], "%d", &id)
-	if id > 0 {
-		return id
+	if len(urlStr) >= 10 {
+		_, _ = fmt.Sscanf(urlStr[len(urlStr)-10:], "%d", &id)
+		if id > 0 {
+			return id
+		}
 	}
 	// Try parsing from the end more carefully
 	for i := len(urlStr) - 1; i >= 0; i-- {
 		if urlStr[i] == '/' {
-			fmt.Sscanf(urlStr[i+1:], "%d", &id)
+			_, _ = fmt.Sscanf(urlStr[i+1:], "%d", &id)
 			return id
 		}
 	}
@@ -752,7 +754,7 @@ func (c *Client) DeleteWorkItem(workItemID int) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -775,7 +777,7 @@ func (c *Client) TestConnection() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -800,7 +802,7 @@ func (c *Client) GetIterations() ([]Iteration, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -853,7 +855,7 @@ func (c *Client) UpdateWorkItemPlanning(workItemID int, storyPoints, originalEst
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -882,7 +884,7 @@ func (c *Client) GetWorkItemTypeFields(workItemType string) ([]WorkItemTypeField
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -961,7 +963,7 @@ func (c *Client) UpdateWorkItemPlanningDynamic(workItemID int, fields map[string
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -1010,7 +1012,7 @@ func (c *Client) GetRecentlyChangedWorkItems(assignedTo string, withinMinutes in
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -1055,7 +1057,7 @@ func (c *Client) UpdateWorkItemIteration(workItemID int, iterationPath string) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)

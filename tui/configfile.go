@@ -118,7 +118,7 @@ func SaveConfigFile(config AppConfig) error {
 
 	// Ensure the config directory exists
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0750); err != nil {
 		return err
 	}
 
@@ -129,7 +129,7 @@ func SaveConfigFile(config AppConfig) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, buf.Bytes(), 0644)
+	return os.WriteFile(configPath, buf.Bytes(), 0600)
 }
 
 // GetConfigFilePath returns the config file path for display purposes
@@ -260,7 +260,7 @@ func (m Model) viewConfigFile() string {
 	for i, setting := range settings {
 		style := labelStyle
 		if i == m.configFileFocus {
-			style = style.Copy().Foreground(lipgloss.Color("229"))
+			style = style.Foreground(lipgloss.Color("229"))
 		}
 
 		b.WriteString(style.Render(setting.label))

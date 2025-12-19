@@ -106,7 +106,7 @@ func (m Model) updateBoard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				wi := m.workItems[m.cursor]
 				url := fmt.Sprintf("https://dev.azure.com/%s/%s/_workitems/edit/%d",
 					m.client.Organization, m.client.Project, wi.ID)
-				openBrowser(url)
+				_ = openBrowser(url)
 			}
 			return m, nil
 		case "e", "enter":
@@ -230,10 +230,6 @@ func (m Model) viewBoard() string {
 			maxVisible = 10 // Height not yet initialized
 		}
 		pageSize := maxVisible
-		totalPages := (len(m.workItems) + pageSize - 1) / pageSize
-		if totalPages == 0 {
-			totalPages = 1
-		}
 		currentPage := m.cursor / pageSize
 
 		start := currentPage * pageSize

@@ -787,13 +787,6 @@ func (m Model) updatePlanningDynamic(workItemID int, fields map[string]float64) 
 	}
 }
 
-func (m Model) updatePlanning(workItemID int, storyPoints, originalEstimate, remainingWork, completedWork *float64) tea.Cmd {
-	return func() tea.Msg {
-		item, err := m.client.UpdateWorkItemPlanning(workItemID, storyPoints, originalEstimate, remainingWork, completedWork)
-		return updatePlanningMsg{item: item, err: err}
-	}
-}
-
 // updatePlanningInputsFromWorkItem populates the planning inputs from the selected work item (static)
 func (m *Model) updatePlanningInputsFromWorkItem() {
 	if m.selectedItem == nil {

@@ -16,7 +16,7 @@ import (
 // parseMentions extracts @mentions from comment HTML and returns formatted text
 // with highlighted mentions. The format is:
 // <a href=\"#\" data-vss-mention=\"version:2.0,{user-guid}\">@Display Name</a>
-func parseMentions(text string, orgURL string) string {
+func parseMentions(text string, _ string) string {
 	// Regex to match mention anchor tags
 	mentionRegex := regexp.MustCompile(`<a[^>]*data-vss-mention=\"version:[^,]*,([^\"]*)\"[^>]*>@([^<]*)</a>`)
 
@@ -541,7 +541,7 @@ func (m Model) viewDetail() string {
 	for i, label := range labels {
 		style := labelStyle
 		if i == m.detailFocus {
-			style = style.Copy().Foreground(lipgloss.Color("229"))
+			style = style.Foreground(lipgloss.Color("229"))
 		}
 		b.WriteString(style.Render(label))
 		if hints[i] != "" {
@@ -564,7 +564,7 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n\n")
 
 	// Iteration section
-	iterationHeaderStyle := labelStyle.Copy()
+	iterationHeaderStyle := labelStyle
 	if m.iterationExpanded {
 		iterationHeaderStyle = iterationHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
 	}
@@ -624,7 +624,7 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n")
 
 	// Related items section (parent/children)
-	relatedHeaderStyle := labelStyle.Copy()
+	relatedHeaderStyle := labelStyle
 	if m.relatedExpanded {
 		relatedHeaderStyle = relatedHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
 	}
@@ -736,7 +736,7 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n")
 
 	// Comments section
-	commentHeaderStyle := labelStyle.Copy()
+	commentHeaderStyle := labelStyle
 	if m.commentsExpanded {
 		commentHeaderStyle = commentHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
 	}
@@ -813,7 +813,7 @@ func (m Model) viewDetail() string {
 	b.WriteString("\n")
 
 	// Planning section
-	planningHeaderStyle := labelStyle.Copy()
+	planningHeaderStyle := labelStyle
 	if m.planningExpanded {
 		planningHeaderStyle = planningHeaderStyle.Background(lipgloss.Color("57")).Foreground(lipgloss.Color("229"))
 	}
@@ -974,51 +974,6 @@ func (m *Model) savePlanningFieldsDynamic() tea.Cmd {
 
 	m.loading = true
 	return m.updatePlanningDynamic(m.selectedItem.ID, fields)
-}
-
-// savePlanningFields parses and saves the planning fields
-func (m *Model) savePlanningFields() tea.Cmd {
-	var storyPoints, originalEstimate, remainingWork, completedWork *float64
-
-	// Parse Story Points
-	if v := m.planningInputs[0].Value(); v != "" {
-		var f float64
-		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
-			storyPoints = &f
-		}
-	}
-
-	// Parse Original Estimate
-	if v := m.planningInputs[1].Value(); v != "" {
-		var f float64
-		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
-			originalEstimate = &f
-		}
-	}
-
-	// Parse Remaining Work
-	if v := m.planningInputs[2].Value(); v != "" {
-		var f float64
-		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
-			remainingWork = &f
-		}
-	}
-
-	// Parse Completed Work
-	if v := m.planningInputs[3].Value(); v != "" {
-		var f float64
-		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
-			completedWork = &f
-		}
-	}
-
-	// Only update if at least one field has a value
-	if storyPoints == nil && originalEstimate == nil && remainingWork == nil && completedWork == nil {
-		return nil
-	}
-
-	m.loading = true
-	return m.updatePlanning(m.selectedItem.ID, storyPoints, originalEstimate, remainingWork, completedWork)
 }
 
 // getIterationDisplayOrder returns iterations with current iteration first

@@ -47,7 +47,7 @@ func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "ctrl+d":
 			// Clear stored credentials
-			ClearCredentials()
+			_ = ClearCredentials()
 			m.configInputs[0].SetValue("")
 			m.configInputs[1].SetValue("")
 			m.configInputs[2].SetValue("")
@@ -102,7 +102,7 @@ func (m Model) viewConfig() string {
 	for i, label := range labels {
 		style := labelStyle
 		if i == m.configFocus {
-			style = style.Copy().Foreground(lipgloss.Color("229"))
+			style = style.Foreground(lipgloss.Color("229"))
 		}
 		b.WriteString(style.Render(label))
 		b.WriteString("\n")
