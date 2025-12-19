@@ -1087,7 +1087,7 @@ func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
 
 	var hyperlinks []Hyperlink
 	for _, rel := range wi.Relations {
-		if rel.Rel == "Hyperlink" {
+		if rel.Rel == "ArtifactLink" {
 			comment := ""
 			if rel.Attributes != nil {
 				if c, ok := rel.Attributes["comment"].(string); ok {
@@ -1109,7 +1109,7 @@ func (c *Client) AddHyperlink(workItemID int, url string, comment string) error 
 	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
 
 	linkValue := map[string]interface{}{
-		"rel": "Hyperlink",
+		"rel": "ArtifactLink",
 		"url": url,
 	}
 	if comment != "" {
@@ -1159,7 +1159,7 @@ func (c *Client) RemoveHyperlink(workItemID int, url string) error {
 
 	// Find the relation index for the hyperlink with matching URL
 	for i, rel := range wi.Relations {
-		if rel.Rel == "Hyperlink" && rel.URL == url {
+		if rel.Rel == "ArtifactLink" && rel.URL == url {
 			return c.RemoveRelation(workItemID, i)
 		}
 	}
