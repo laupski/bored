@@ -648,7 +648,7 @@ func TestAddHyperlinkValidation(t *testing.T) {
 		},
 		{
 			name:        "invalid URL format",
-			url:         "not a url",
+			url:         "://invalid",
 			comment:     "",
 			expectError: true,
 			errorText:   "invalid URL format",
@@ -661,8 +661,15 @@ func TestAddHyperlinkValidation(t *testing.T) {
 			errorText:   "invalid URL scheme",
 		},
 		{
+			name:        "missing scheme treated as invalid",
+			url:         "not a url",
+			comment:     "",
+			expectError: true,
+			errorText:   "invalid URL scheme",
+		},
+		{
 			name:        "URL too long",
-			url:         "https://example.com/" + string(make([]byte, 2100)),
+			url:         "https://example.com/" + strings.Repeat("a", 2100),
 			comment:     "",
 			expectError: true,
 			errorText:   "URL too long",
@@ -670,7 +677,7 @@ func TestAddHyperlinkValidation(t *testing.T) {
 		{
 			name:        "comment too long",
 			url:         "https://example.com",
-			comment:     string(make([]byte, 600)),
+			comment:     strings.Repeat("a", 600),
 			expectError: true,
 			errorText:   "comment too long",
 		},
@@ -696,9 +703,6 @@ func TestAddHyperlinkValidation(t *testing.T) {
 }
 
 func TestRemoveHyperlinkErrorMessage(t *testing.T) {
-	// Test that error messages include context
-	client := NewClient("org", "project", "", "", "pat")
-
 	// Create a mock server that returns a work item without the hyperlink
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wi := WorkItem{

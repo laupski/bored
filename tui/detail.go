@@ -285,7 +285,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				} else {
 					// Show error feedback if clipboard read fails
-					m.err = fmt.Errorf("failed to read clipboard: %v", err)
+					m.err = fmt.Errorf("failed to read clipboard: %w", err)
 				}
 				return m, nil
 			default:
