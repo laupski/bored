@@ -283,6 +283,9 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						m.hyperlinkComment += content
 					}
+				} else {
+					// Show error feedback if clipboard read fails
+					m.err = fmt.Errorf("failed to read clipboard: %v", err)
 				}
 				return m, nil
 			default:
@@ -887,16 +890,15 @@ func (m Model) viewDetail() string {
 
 			// Parse GitHub URL to show owner/repo#PR format
 			if strings.Contains(githubURL, "github.com") && strings.Contains(githubURL, "/pull/") {
+				// Use regex for more robust parsing
 				// Expected format: https://github.com/owner/repo/pull/123
-				parts := strings.Split(githubURL, "/")
-				if len(parts) >= 7 {
-					owner := parts[3]
-					repo := parts[4]
-					prNum := parts[len(parts)-1]
-					// Remove any query params or fragments
-					if idx := strings.IndexAny(prNum, "?#"); idx != -1 {
-						prNum = prNum[:idx]
-					}
+				// Handles query params, fragments, and trailing slashes
+				ghRegex := regexp.MustCompile(`github\.com/([^/]+)/([^/]+)/pull/(\d+)`)
+				matches := ghRegex.FindStringSubmatch(githubURL)
+				if len(matches) == 4 {
+					owner := matches[1]
+					repo := matches[2]
+					prNum := matches[3]
 					displayURL = fmt.Sprintf("%s/%s#%s", owner, repo, prNum)
 				}
 			}

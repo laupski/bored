@@ -1111,7 +1111,29 @@ func (c *Client) GetHyperlinks(workItemID int) ([]Hyperlink, error) {
 }
 
 // AddHyperlink adds a hyperlink to a work item
-func (c *Client) AddHyperlink(workItemID int, url string, comment string) error {
+// Validates URL format and enforces length limits before adding
+func (c *Client) AddHyperlink(workItemID int, urlStr string, comment string) error {
+	// Validate URL format
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Validate URL scheme (only http/https allowed)
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("invalid URL scheme: only http and https are allowed")
+	}
+
+	// Validate URL length (max 2048 characters)
+	if len(urlStr) > 2048 {
+		return fmt.Errorf("URL too long: maximum length is 2048 characters")
+	}
+
+	// Validate comment length (max 500 characters)
+	if len(comment) > 500 {
+		return fmt.Errorf("comment too long: maximum length is 500 characters")
+	}
+
 	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
 
 	attributes := map[string]interface{}{}
@@ -1121,7 +1143,7 @@ func (c *Client) AddHyperlink(workItemID int, url string, comment string) error 
 
 	linkValue := map[string]interface{}{
 		"rel":        "Hyperlink",
-		"url":        url,
+		"url":        urlStr,
 		"attributes": attributes,
 	}
 
@@ -1174,5 +1196,5 @@ func (c *Client) RemoveHyperlink(workItemID int, url string) error {
 		}
 	}
 
-	return fmt.Errorf("hyperlink not found")
+	return fmt.Errorf("hyperlink %s not found in work item %d", url, workItemID)
 }
