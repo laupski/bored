@@ -3,11 +3,57 @@ package azdo
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// testClient creates a client configured to use a mock server
+func testClient(handler http.HandlerFunc) (*Client, *httptest.Server) {
+	server := httptest.NewServer(handler)
+	client := &Client{
+		Organization: "testorg",
+		Project:      "testproject",
+		Team:         "testteam",
+		AreaPath:     "TestProject\\TestTeam",
+		PAT:          "testpat",
+		httpClient:   server.Client(),
+	}
+	return client, server
+}
+
+// mockServerURL replaces the client's base URL for testing
+type mockTransport struct {
+	baseURL   string
+	transport http.RoundTripper
+}
+
+func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Rewrite the URL to point to our test server
+	req.URL.Scheme = "http"
+	req.URL.Host = strings.TrimPrefix(t.baseURL, "http://")
+	return t.transport.RoundTrip(req)
+}
+
+func testClientWithMockTransport(handler http.HandlerFunc) (*Client, *httptest.Server) {
+	server := httptest.NewServer(handler)
+	client := &Client{
+		Organization: "testorg",
+		Project:      "testproject",
+		Team:         "testteam",
+		AreaPath:     "TestProject\\TestTeam",
+		PAT:          "testpat",
+		httpClient: &http.Client{
+			Transport: &mockTransport{
+				baseURL:   server.URL,
+				transport: http.DefaultTransport,
+			},
+		},
+	}
+	return client, server
+}
 
 func TestNewClient(t *testing.T) {
 	client := NewClient("myorg", "myproject", "myteam", "MyProject\\MyTeam", "pat123")
@@ -789,5 +835,1287 @@ func TestHyperlinkParsing(t *testing.T) {
 	}
 	if wi.Relations[1].URL != "https://docs.example.com" {
 		t.Errorf("Second relation URL = %v", wi.Relations[1].URL)
+	}
+}
+
+// ============ HTTP Mock Tests ============
+
+func TestGetWorkItemsPaged(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			// WIQL query
+			if r.Method != "POST" {
+				t.Errorf("Expected POST for WIQL, got %s", r.Method)
+			}
+			response := WorkItemQueryResult{
+				WorkItems: []WorkItemRef{
+					{ID: 1, URL: "https://dev.azure.com/org/project/_apis/wit/workItems/1"},
+					{ID: 2, URL: "https://dev.azure.com/org/project/_apis/wit/workItems/2"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			// Get work items by IDs
+			if r.Method != "GET" {
+				t.Errorf("Expected GET for work items, got %s", r.Method)
+			}
+			response := WorkItemListResponse{
+				Count: 2,
+				Value: []WorkItem{
+					{ID: 1, Fields: WorkItemFields{Title: "First", State: "Active", WorkItemType: "Bug"}},
+					{ID: 2, Fields: WorkItemFields{Title: "Second", State: "New", WorkItemType: "Task"}},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	items, err := client.GetWorkItemsPaged("Bug", "user@example.com", 10, 0)
+	if err != nil {
+		t.Fatalf("GetWorkItemsPaged failed: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Errorf("Expected 2 items, got %d", len(items))
+	}
+	if items[0].ID != 1 {
+		t.Errorf("First item ID = %d, want 1", items[0].ID)
+	}
+}
+
+func TestGetWorkItemsPagedEmpty(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItemQueryResult{WorkItems: []WorkItemRef{}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	items, err := client.GetWorkItemsPaged("", "", 10, 0)
+	if err != nil {
+		t.Fatalf("GetWorkItemsPaged failed: %v", err)
+	}
+
+	if len(items) != 0 {
+		t.Errorf("Expected 0 items, got %d", len(items))
+	}
+}
+
+func TestGetWorkItemsPagedWithSkip(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			response := WorkItemQueryResult{
+				WorkItems: []WorkItemRef{
+					{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			response := WorkItemListResponse{
+				Count: 2,
+				Value: []WorkItem{
+					{ID: 3, Fields: WorkItemFields{Title: "Third"}},
+					{ID: 4, Fields: WorkItemFields{Title: "Fourth"}},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	items, err := client.GetWorkItemsPaged("", "", 2, 2)
+	if err != nil {
+		t.Fatalf("GetWorkItemsPaged failed: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Errorf("Expected 2 items, got %d", len(items))
+	}
+}
+
+func TestGetWorkItemsPagedSkipBeyondResults(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItemQueryResult{
+			WorkItems: []WorkItemRef{{ID: 1}, {ID: 2}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	items, err := client.GetWorkItemsPaged("", "", 10, 10) // Skip 10, but only 2 exist
+	if err != nil {
+		t.Fatalf("GetWorkItemsPaged failed: %v", err)
+	}
+
+	if len(items) != 0 {
+		t.Errorf("Expected 0 items when skip beyond results, got %d", len(items))
+	}
+}
+
+func TestGetWorkItemsPagedAPIError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("Unauthorized"))
+	})
+	defer server.Close()
+
+	_, err := client.GetWorkItemsPaged("", "", 10, 0)
+	if err == nil {
+		t.Error("Expected error for API failure")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("Expected 401 error, got: %v", err)
+	}
+}
+
+func TestGetWorkItems(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			response := WorkItemQueryResult{
+				WorkItems: []WorkItemRef{{ID: 1}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			response := WorkItemListResponse{
+				Count: 1,
+				Value: []WorkItem{{ID: 1, Fields: WorkItemFields{Title: "Test"}}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	items, err := client.GetWorkItems("Bug", 10)
+	if err != nil {
+		t.Fatalf("GetWorkItems failed: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Errorf("Expected 1 item, got %d", len(items))
+	}
+}
+
+func TestGetWorkItemsFiltered(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			response := WorkItemQueryResult{
+				WorkItems: []WorkItemRef{{ID: 1}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			response := WorkItemListResponse{
+				Count: 1,
+				Value: []WorkItem{{ID: 1, Fields: WorkItemFields{Title: "Test"}}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	items, err := client.GetWorkItemsFiltered("Task", "user@example.com", 10)
+	if err != nil {
+		t.Fatalf("GetWorkItemsFiltered failed: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Errorf("Expected 1 item, got %d", len(items))
+	}
+}
+
+func TestGetWorkItemsByIDs(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItemListResponse{
+			Count: 2,
+			Value: []WorkItem{
+				{ID: 1, Fields: WorkItemFields{Title: "First"}},
+				{ID: 2, Fields: WorkItemFields{Title: "Second"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	items, err := client.getWorkItemsByIDs([]string{"1", "2"})
+	if err != nil {
+		t.Fatalf("getWorkItemsByIDs failed: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Errorf("Expected 2 items, got %d", len(items))
+	}
+}
+
+func TestGetWorkItemsByIDsEmpty(t *testing.T) {
+	client := NewClient("org", "proj", "", "", "pat")
+	items, err := client.getWorkItemsByIDs([]string{})
+	if err != nil {
+		t.Fatalf("getWorkItemsByIDs failed: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("Expected 0 items for empty IDs, got %d", len(items))
+	}
+}
+
+func TestCreateWorkItem(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("Expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.Header.Get("Content-Type"), "application/json-patch+json") {
+			t.Errorf("Expected json-patch+json content type")
+		}
+
+		response := WorkItem{
+			ID:  123,
+			Rev: 1,
+			Fields: WorkItemFields{
+				Title:        "New Bug",
+				State:        "New",
+				WorkItemType: "Bug",
+			},
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	wi, err := client.CreateWorkItem("Bug", "New Bug", "Description", 2)
+	if err != nil {
+		t.Fatalf("CreateWorkItem failed: %v", err)
+	}
+
+	if wi.ID != 123 {
+		t.Errorf("Expected ID 123, got %d", wi.ID)
+	}
+	if wi.Fields.Title != "New Bug" {
+		t.Errorf("Expected title 'New Bug', got %s", wi.Fields.Title)
+	}
+}
+
+func TestCreateWorkItemWithAssignee(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "System.AssignedTo") {
+			t.Error("Expected AssignedTo in request body")
+		}
+
+		response := WorkItem{ID: 123, Fields: WorkItemFields{Title: "Test"}}
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	wi, err := client.CreateWorkItemWithAssignee("Task", "Test", "", 0, "user@example.com")
+	if err != nil {
+		t.Fatalf("CreateWorkItemWithAssignee failed: %v", err)
+	}
+
+	if wi.ID != 123 {
+		t.Errorf("Expected ID 123, got %d", wi.ID)
+	}
+}
+
+func TestCreateWorkItemAPIError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("Invalid request"))
+	})
+	defer server.Close()
+
+	_, err := client.CreateWorkItem("Bug", "Test", "", 0)
+	if err == nil {
+		t.Error("Expected error for bad request")
+	}
+}
+
+func TestCreateWorkItemWithParent(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "System.LinkTypes.Hierarchy-Reverse") {
+			t.Error("Expected parent link relation in body")
+		}
+
+		response := WorkItem{ID: 124, Fields: WorkItemFields{Title: "Child Task"}}
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	wi, err := client.CreateWorkItemWithParent("Task", "Child Task", "", 0, 100)
+	if err != nil {
+		t.Fatalf("CreateWorkItemWithParent failed: %v", err)
+	}
+
+	if wi.ID != 124 {
+		t.Errorf("Expected ID 124, got %d", wi.ID)
+	}
+}
+
+func TestCreateWorkItemWithParentAndAssignee(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "System.LinkTypes.Hierarchy-Reverse") {
+			t.Error("Expected parent link relation in body")
+		}
+		if !strings.Contains(string(body), "System.AssignedTo") {
+			t.Error("Expected AssignedTo in body")
+		}
+
+		response := WorkItem{ID: 125, Fields: WorkItemFields{Title: "Child"}}
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	wi, err := client.CreateWorkItemWithParentAndAssignee("Task", "Child", "Desc", 1, 100, "user@example.com")
+	if err != nil {
+		t.Fatalf("CreateWorkItemWithParentAndAssignee failed: %v", err)
+	}
+
+	if wi.ID != 125 {
+		t.Errorf("Expected ID 125, got %d", wi.ID)
+	}
+}
+
+func TestAddChildLink(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("Expected PATCH, got %s", r.Method)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "System.LinkTypes.Hierarchy-Forward") {
+			t.Error("Expected child link relation in body")
+		}
+
+		response := WorkItem{ID: 100}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	err := client.AddChildLink(100, 101)
+	if err != nil {
+		t.Fatalf("AddChildLink failed: %v", err)
+	}
+}
+
+func TestAddChildLinkError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("Link already exists"))
+	})
+	defer server.Close()
+
+	err := client.AddChildLink(100, 101)
+	if err == nil {
+		t.Error("Expected error for failed link")
+	}
+}
+
+func TestRemoveRelation(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("Expected PATCH, got %s", r.Method)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "remove") {
+			t.Error("Expected remove operation")
+		}
+
+		response := WorkItem{ID: 100}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	err := client.RemoveRelation(100, 0)
+	if err != nil {
+		t.Fatalf("RemoveRelation failed: %v", err)
+	}
+}
+
+func TestRemoveRelationError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("Relation not found"))
+	})
+	defer server.Close()
+
+	err := client.RemoveRelation(100, 99)
+	if err == nil {
+		t.Error("Expected error for failed removal")
+	}
+}
+
+func TestRemoveHierarchyLink(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			// GetWorkItemWithRelations
+			response := WorkItem{
+				ID: 100,
+				Relations: []WorkItemRelation{
+					{Rel: "System.LinkTypes.Hierarchy-Reverse", URL: "https://dev.azure.com/org/proj/_apis/wit/workItems/200"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			// RemoveRelation
+			response := WorkItem{ID: 100}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	err := client.RemoveHierarchyLink(100, 200, true)
+	if err != nil {
+		t.Fatalf("RemoveHierarchyLink failed: %v", err)
+	}
+}
+
+func TestRemoveHierarchyLinkNotFound(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItem{ID: 100, Relations: []WorkItemRelation{}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	err := client.RemoveHierarchyLink(100, 200, true)
+	if err == nil {
+		t.Error("Expected 'relation not found' error")
+	}
+	if !strings.Contains(err.Error(), "relation not found") {
+		t.Errorf("Expected 'relation not found', got: %v", err)
+	}
+}
+
+func TestGetWorkItemTypesAPI(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected GET, got %s", r.Method)
+		}
+
+		response := WorkItemTypesResponse{
+			Count: 3,
+			Value: []WorkItemType{
+				{Name: "Bug"},
+				{Name: "Task"},
+				{Name: "User Story"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	types, err := client.GetWorkItemTypes()
+	if err != nil {
+		t.Fatalf("GetWorkItemTypes failed: %v", err)
+	}
+
+	if len(types) != 3 {
+		t.Errorf("Expected 3 types, got %d", len(types))
+	}
+}
+
+func TestGetWorkItemTypesAPIError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("Server error"))
+	})
+	defer server.Close()
+
+	_, err := client.GetWorkItemTypes()
+	if err == nil {
+		t.Error("Expected error for server failure")
+	}
+}
+
+func TestGetCommentsAPI(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected GET, got %s", r.Method)
+		}
+
+		response := CommentsResponse{
+			Count: 2,
+			Comments: []Comment{
+				{ID: 1, Text: "First comment", CreatedBy: IdentityRef{DisplayName: "User1"}},
+				{ID: 2, Text: "Second comment", CreatedBy: IdentityRef{DisplayName: "User2"}},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	comments, err := client.GetComments(123)
+	if err != nil {
+		t.Fatalf("GetComments failed: %v", err)
+	}
+
+	if len(comments) != 2 {
+		t.Errorf("Expected 2 comments, got %d", len(comments))
+	}
+	if comments[0].Text != "First comment" {
+		t.Errorf("First comment text = %s, want 'First comment'", comments[0].Text)
+	}
+}
+
+func TestGetCommentsAPIError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("Access denied"))
+	})
+	defer server.Close()
+
+	_, err := client.GetComments(123)
+	if err == nil {
+		t.Error("Expected error for access denied")
+	}
+}
+
+func TestAddComment(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("Expected POST, got %s", r.Method)
+		}
+
+		response := Comment{ID: 3, Text: "New comment"}
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	err := client.AddComment(123, "New comment")
+	if err != nil {
+		t.Fatalf("AddComment failed: %v", err)
+	}
+}
+
+func TestAddCommentError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("Comment too long"))
+	})
+	defer server.Close()
+
+	err := client.AddComment(123, "Test")
+	if err == nil {
+		t.Error("Expected error for bad request")
+	}
+}
+
+func TestUpdateWorkItem(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("Expected PATCH, got %s", r.Method)
+		}
+
+		response := WorkItem{
+			ID:     123,
+			Fields: WorkItemFields{Title: "Updated Title", State: "Active"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	wi, err := client.UpdateWorkItem(123, "Updated Title", "Active", "user@example.com", "tag1; tag2")
+	if err != nil {
+		t.Fatalf("UpdateWorkItem failed: %v", err)
+	}
+
+	if wi.Fields.Title != "Updated Title" {
+		t.Errorf("Title = %s, want 'Updated Title'", wi.Fields.Title)
+	}
+}
+
+func TestUpdateWorkItemError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte("Conflict"))
+	})
+	defer server.Close()
+
+	_, err := client.UpdateWorkItem(123, "Test", "", "", "")
+	if err == nil {
+		t.Error("Expected error for conflict")
+	}
+}
+
+func TestGetWorkItemWithRelations(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected GET, got %s", r.Method)
+		}
+
+		response := WorkItem{
+			ID:     123,
+			Fields: WorkItemFields{Title: "Test Item"},
+			Relations: []WorkItemRelation{
+				{Rel: "System.LinkTypes.Hierarchy-Forward", URL: "https://dev.azure.com/org/proj/_apis/wit/workItems/124"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	wi, err := client.GetWorkItemWithRelations(123)
+	if err != nil {
+		t.Fatalf("GetWorkItemWithRelations failed: %v", err)
+	}
+
+	if wi.ID != 123 {
+		t.Errorf("ID = %d, want 123", wi.ID)
+	}
+	if len(wi.Relations) != 1 {
+		t.Errorf("Relations count = %d, want 1", len(wi.Relations))
+	}
+}
+
+func TestGetWorkItemWithRelationsError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("Work item not found"))
+	})
+	defer server.Close()
+
+	_, err := client.GetWorkItemWithRelations(999)
+	if err == nil {
+		t.Error("Expected error for not found")
+	}
+}
+
+func TestGetRelatedWorkItems(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			// Get work item with relations
+			response := WorkItem{
+				ID: 100,
+				Relations: []WorkItemRelation{
+					{Rel: "System.LinkTypes.Hierarchy-Reverse", URL: "https://dev.azure.com/org/proj/_apis/wit/workItems/200"},
+					{Rel: "System.LinkTypes.Hierarchy-Forward", URL: "https://dev.azure.com/org/proj/_apis/wit/workItems/101"},
+					{Rel: "System.LinkTypes.Hierarchy-Forward", URL: "https://dev.azure.com/org/proj/_apis/wit/workItems/102"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else if requestCount == 2 {
+			// Get parent
+			response := WorkItem{ID: 200, Fields: WorkItemFields{Title: "Parent"}}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			// Get children
+			response := WorkItemListResponse{
+				Count: 2,
+				Value: []WorkItem{
+					{ID: 101, Fields: WorkItemFields{Title: "Child 1"}},
+					{ID: 102, Fields: WorkItemFields{Title: "Child 2"}},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	parent, children, err := client.GetRelatedWorkItems(100)
+	if err != nil {
+		t.Fatalf("GetRelatedWorkItems failed: %v", err)
+	}
+
+	if parent == nil {
+		t.Error("Expected parent not to be nil")
+	} else if parent.ID != 200 {
+		t.Errorf("Parent ID = %d, want 200", parent.ID)
+	}
+
+	if len(children) != 2 {
+		t.Errorf("Children count = %d, want 2", len(children))
+	}
+}
+
+func TestGetRelatedWorkItemsNoRelations(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItem{ID: 100, Relations: []WorkItemRelation{}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	parent, children, err := client.GetRelatedWorkItems(100)
+	if err != nil {
+		t.Fatalf("GetRelatedWorkItems failed: %v", err)
+	}
+
+	if parent != nil {
+		t.Error("Expected parent to be nil")
+	}
+	if len(children) != 0 {
+		t.Errorf("Expected 0 children, got %d", len(children))
+	}
+}
+
+func TestDeleteWorkItem(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" {
+			t.Errorf("Expected DELETE, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	defer server.Close()
+
+	err := client.DeleteWorkItem(123)
+	if err != nil {
+		t.Fatalf("DeleteWorkItem failed: %v", err)
+	}
+}
+
+func TestDeleteWorkItemError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("Cannot delete"))
+	})
+	defer server.Close()
+
+	err := client.DeleteWorkItem(123)
+	if err == nil {
+		t.Error("Expected error for forbidden")
+	}
+}
+
+func TestTestConnection(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected GET, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "project-id", "name": "testproject"}`))
+	})
+	defer server.Close()
+
+	err := client.TestConnection()
+	if err != nil {
+		t.Fatalf("TestConnection failed: %v", err)
+	}
+}
+
+func TestTestConnectionError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("Invalid PAT"))
+	})
+	defer server.Close()
+
+	err := client.TestConnection()
+	if err == nil {
+		t.Error("Expected error for unauthorized")
+	}
+	if !strings.Contains(err.Error(), "connection failed") {
+		t.Errorf("Expected 'connection failed', got: %v", err)
+	}
+}
+
+func TestGetIterations(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected GET, got %s", r.Method)
+		}
+
+		response := IterationsResponse{
+			Count: 3,
+			Value: []Iteration{
+				{ID: "1", Name: "Sprint 1", Path: "Project\\Sprint 1"},
+				{ID: "2", Name: "Sprint 2", Path: "Project\\Sprint 2"},
+				{ID: "3", Name: "Backlog", Path: "Project\\Backlog"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	iterations, err := client.GetIterations()
+	if err != nil {
+		t.Fatalf("GetIterations failed: %v", err)
+	}
+
+	if len(iterations) != 3 {
+		t.Errorf("Expected 3 iterations, got %d", len(iterations))
+	}
+}
+
+func TestGetIterationsError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("Team not found"))
+	})
+	defer server.Close()
+
+	_, err := client.GetIterations()
+	if err == nil {
+		t.Error("Expected error for not found")
+	}
+}
+
+func TestUpdateWorkItemPlanning(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("Expected PATCH, got %s", r.Method)
+		}
+
+		storyPoints := 5.0
+		response := WorkItem{
+			ID:     123,
+			Fields: WorkItemFields{Title: "Test", StoryPoints: &storyPoints},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	sp := 5.0
+	wi, err := client.UpdateWorkItemPlanning(123, &sp, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("UpdateWorkItemPlanning failed: %v", err)
+	}
+
+	if wi.Fields.StoryPoints == nil || *wi.Fields.StoryPoints != 5.0 {
+		t.Error("Expected StoryPoints to be 5.0")
+	}
+}
+
+func TestUpdateWorkItemPlanningNoUpdates(t *testing.T) {
+	client := NewClient("org", "proj", "", "", "pat")
+
+	_, err := client.UpdateWorkItemPlanning(123, nil, nil, nil, nil)
+	if err == nil {
+		t.Error("Expected error when no updates specified")
+	}
+	if !strings.Contains(err.Error(), "no planning updates") {
+		t.Errorf("Expected 'no planning updates' error, got: %v", err)
+	}
+}
+
+func TestUpdateWorkItemPlanningError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("Invalid value"))
+	})
+	defer server.Close()
+
+	sp := 5.0
+	_, err := client.UpdateWorkItemPlanning(123, &sp, nil, nil, nil)
+	if err == nil {
+		t.Error("Expected error for bad request")
+	}
+}
+
+func TestGetWorkItemTypeFields(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItemTypeFieldsResponse{
+			Count: 3,
+			Value: []WorkItemTypeField{
+				{ReferenceName: "System.Title", Name: "Title", ReadOnly: false},
+				{ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints", Name: "Story Points", ReadOnly: false},
+				{ReferenceName: "System.CreatedDate", Name: "Created Date", ReadOnly: true},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	fields, err := client.GetWorkItemTypeFields("User Story")
+	if err != nil {
+		t.Fatalf("GetWorkItemTypeFields failed: %v", err)
+	}
+
+	if len(fields) != 3 {
+		t.Errorf("Expected 3 fields, got %d", len(fields))
+	}
+}
+
+func TestGetWorkItemTypeFieldsError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("Type not found"))
+	})
+	defer server.Close()
+
+	_, err := client.GetWorkItemTypeFields("InvalidType")
+	if err == nil {
+		t.Error("Expected error for invalid type")
+	}
+}
+
+func TestGetPlanningFields(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItemTypeFieldsResponse{
+			Count: 4,
+			Value: []WorkItemTypeField{
+				{ReferenceName: "Microsoft.VSTS.Scheduling.StoryPoints", Name: "Story Points", ReadOnly: false},
+				{ReferenceName: "Microsoft.VSTS.Scheduling.OriginalEstimate", Name: "Original Estimate", ReadOnly: false},
+				{ReferenceName: "Microsoft.VSTS.Scheduling.RemainingWork", Name: "Remaining Work", ReadOnly: true},
+				{ReferenceName: "System.Title", Name: "Title", ReadOnly: false},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	fields, err := client.GetPlanningFields("User Story")
+	if err != nil {
+		t.Fatalf("GetPlanningFields failed: %v", err)
+	}
+
+	// Should only include planning fields that are not read-only
+	if len(fields) != 2 {
+		t.Errorf("Expected 2 planning fields (excluding read-only), got %d", len(fields))
+	}
+}
+
+func TestUpdateWorkItemPlanningDynamic(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "Microsoft.VSTS.Scheduling.StoryPoints") {
+			t.Error("Expected StoryPoints field in body")
+		}
+
+		storyPoints := 8.0
+		response := WorkItem{
+			ID:     123,
+			Fields: WorkItemFields{StoryPoints: &storyPoints},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	fields := map[string]float64{
+		"Microsoft.VSTS.Scheduling.StoryPoints": 8.0,
+	}
+	wi, err := client.UpdateWorkItemPlanningDynamic(123, fields)
+	if err != nil {
+		t.Fatalf("UpdateWorkItemPlanningDynamic failed: %v", err)
+	}
+
+	if wi.Fields.StoryPoints == nil || *wi.Fields.StoryPoints != 8.0 {
+		t.Error("Expected StoryPoints to be 8.0")
+	}
+}
+
+func TestUpdateWorkItemPlanningDynamicNoFields(t *testing.T) {
+	client := NewClient("org", "proj", "", "", "pat")
+
+	_, err := client.UpdateWorkItemPlanningDynamic(123, map[string]float64{})
+	if err == nil {
+		t.Error("Expected error when no fields provided")
+	}
+}
+
+func TestGetRecentlyChangedWorkItems(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			response := WorkItemQueryResult{
+				WorkItems: []WorkItemRef{{ID: 1}, {ID: 2}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			response := WorkItemListResponse{
+				Count: 2,
+				Value: []WorkItem{
+					{ID: 1, Fields: WorkItemFields{Title: "Changed 1"}},
+					{ID: 2, Fields: WorkItemFields{Title: "Changed 2"}},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	items, err := client.GetRecentlyChangedWorkItems("user@example.com", 30)
+	if err != nil {
+		t.Fatalf("GetRecentlyChangedWorkItems failed: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Errorf("Expected 2 items, got %d", len(items))
+	}
+}
+
+func TestGetRecentlyChangedWorkItemsEmptyAssignee(t *testing.T) {
+	client := NewClient("org", "proj", "", "", "pat")
+
+	items, err := client.GetRecentlyChangedWorkItems("", 30)
+	if err != nil {
+		t.Fatalf("GetRecentlyChangedWorkItems failed: %v", err)
+	}
+
+	if len(items) != 0 {
+		t.Errorf("Expected 0 items for empty assignee, got %d", len(items))
+	}
+}
+
+func TestGetRecentlyChangedWorkItemsEmpty(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItemQueryResult{WorkItems: []WorkItemRef{}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	items, err := client.GetRecentlyChangedWorkItems("user@example.com", 30)
+	if err != nil {
+		t.Fatalf("GetRecentlyChangedWorkItems failed: %v", err)
+	}
+
+	if len(items) != 0 {
+		t.Errorf("Expected 0 items, got %d", len(items))
+	}
+}
+
+func TestUpdateWorkItemIteration(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("Expected PATCH, got %s", r.Method)
+		}
+
+		response := WorkItem{
+			ID:     123,
+			Fields: WorkItemFields{Title: "Test", IterationPath: "Project\\Sprint 2"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	wi, err := client.UpdateWorkItemIteration(123, "Project\\Sprint 2")
+	if err != nil {
+		t.Fatalf("UpdateWorkItemIteration failed: %v", err)
+	}
+
+	if wi.Fields.IterationPath != "Project\\Sprint 2" {
+		t.Errorf("IterationPath = %s, want 'Project\\Sprint 2'", wi.Fields.IterationPath)
+	}
+}
+
+func TestUpdateWorkItemIterationError(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("Invalid iteration"))
+	})
+	defer server.Close()
+
+	_, err := client.UpdateWorkItemIteration(123, "Invalid\\Path")
+	if err == nil {
+		t.Error("Expected error for invalid iteration")
+	}
+}
+
+func TestGetHyperlinksAPI(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItem{
+			ID: 123,
+			Relations: []WorkItemRelation{
+				{
+					Rel: "Hyperlink",
+					URL: "https://example.com",
+					Attributes: map[string]interface{}{
+						"comment": "Documentation",
+					},
+				},
+				{
+					Rel: "ArtifactLink",
+					URL: "vstfs:///GitHub/PullRequest/abc",
+					Attributes: map[string]interface{}{
+						"name":    "https://github.com/owner/repo/pull/1",
+						"comment": "PR link",
+					},
+				},
+				{
+					Rel: "System.LinkTypes.Hierarchy-Forward",
+					URL: "https://dev.azure.com/org/proj/_apis/wit/workItems/124",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	links, err := client.GetHyperlinks(123)
+	if err != nil {
+		t.Fatalf("GetHyperlinks failed: %v", err)
+	}
+
+	if len(links) != 2 {
+		t.Errorf("Expected 2 hyperlinks (excluding hierarchy), got %d", len(links))
+	}
+}
+
+func TestAddHyperlinkAPI(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "Hyperlink") {
+			t.Error("Expected Hyperlink relation type in body")
+		}
+
+		response := WorkItem{ID: 123}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	err := client.AddHyperlink(123, "https://example.com/docs", "Documentation link")
+	if err != nil {
+		t.Fatalf("AddHyperlink failed: %v", err)
+	}
+}
+
+func TestRemoveHyperlinkAPI(t *testing.T) {
+	requestCount := 0
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if requestCount == 1 {
+			// GetWorkItemWithRelations
+			response := WorkItem{
+				ID: 123,
+				Relations: []WorkItemRelation{
+					{Rel: "Hyperlink", URL: "https://example.com"},
+					{Rel: "Hyperlink", URL: "https://other.com"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		} else {
+			// RemoveRelation
+			response := WorkItem{ID: 123}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+		}
+	})
+	defer server.Close()
+
+	err := client.RemoveHyperlink(123, "https://example.com")
+	if err != nil {
+		t.Fatalf("RemoveHyperlink failed: %v", err)
+	}
+}
+
+func TestRemoveHyperlinkNotFound(t *testing.T) {
+	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
+		response := WorkItem{
+			ID: 123,
+			Relations: []WorkItemRelation{
+				{Rel: "Hyperlink", URL: "https://other.com"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	})
+	defer server.Close()
+
+	err := client.RemoveHyperlink(123, "https://notfound.com")
+	if err == nil {
+		t.Error("Expected error for hyperlink not found")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("Expected 'not found' error, got: %v", err)
+	}
+}
+
+func TestAuthHeader(t *testing.T) {
+	client := NewClient("org", "proj", "", "", "testpat")
+	header := client.authHeader()
+
+	if !strings.HasPrefix(header, "Basic ") {
+		t.Errorf("Expected Basic auth, got: %s", header)
+	}
+}
+
+func TestTeamURLWithoutTeam(t *testing.T) {
+	client := NewClient("org", "proj", "", "", "pat")
+	url := client.teamURL()
+
+	expected := "https://dev.azure.com/org/proj"
+	if url != expected {
+		t.Errorf("teamURL() = %s, want %s", url, expected)
+	}
+}
+
+func TestExtractWorkItemIDFromURLEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected int
+	}{
+		{
+			name:     "empty URL",
+			url:      "",
+			expected: 0,
+		},
+		{
+			name:     "short URL",
+			url:      "abc",
+			expected: 0,
+		},
+		{
+			name:     "no ID in URL",
+			url:      "https://example.com/path",
+			expected: 0,
+		},
+		{
+			name:     "ID at end",
+			url:      "https://dev.azure.com/org/proj/_apis/wit/workItems/12345",
+			expected: 12345,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractWorkItemIDFromURL(tt.url)
+			if result != tt.expected {
+				t.Errorf("extractWorkItemIDFromURL(%s) = %d, want %d", tt.url, result, tt.expected)
+			}
+		})
 	}
 }

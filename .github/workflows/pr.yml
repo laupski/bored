@@ -43,8 +43,11 @@ jobs:
       - name: Build
         run: go build -o bin/bored .
 
-      - name: Test
-        run: go test -race ./...
+      - name: Test with coverage
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Display coverage
+        run: go tool cover -func=coverage.out
 
   demo:
     name: Record Demo
