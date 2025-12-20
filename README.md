@@ -2,7 +2,7 @@
 
 <a href="https://github.com/laupski/bored/releases"><img src="https://img.shields.io/github/release/laupski/bored.svg" alt="Latest Release"></a>
 <a href="https://pkg.go.dev/github.com/laupski/bored?tab=doc"><img src="https://godoc.org/github.com/laupski/bored?status.svg" alt="GoDoc"></a>
-<a href="https://github.com/laupski/bored/actions"><img src="https://github.com/laupski/bored/actions/workflows/master.yml/badge.svg?branch=main" alt="Build Status"></a>
+<a href="https://github.com/laupski/bored/actions"><img src="https://github.com/laupski/bored/actions/workflows/master.yml/badge.svg?branch=master" alt="Build Status"></a>
 
 A TUI for Azure DevOps Boards
 
