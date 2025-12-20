@@ -64,7 +64,7 @@ jobs:
         run: go build -o bin/bored .
 
       - name: Record demo
-        uses: charmbracelet/vhs-action@v2
+        uses: charmbracelet/vhs-action@main
         with:
           path: .github/demo.tape
 
@@ -75,4 +75,4 @@ jobs:
           path: |
             demo.gif
             demo.mp4
-          retention-days: 7
+          retention-days: 3
