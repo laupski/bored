@@ -1,3 +1,5 @@
+// Package main provides the entry point for bored, a TUI application
+// for managing Azure DevOps Boards work items from the terminal.
 package main
 
 import (

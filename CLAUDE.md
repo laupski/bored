@@ -41,10 +41,13 @@ just build      # Build binary to bin/bored
 just run        # Run without building (go run)
 just test       # Run all tests
 just test-v     # Run tests with verbose output
+just cover      # Run tests with coverage report
+just cover-html # Run tests with coverage and open HTML report
+just doc        # Serve godoc documentation locally
 just fmt        # Format code
 just vet        # Run go vet
 just lint       # Run golangci-lint
-just check      # Run all checks (fmt, vet, lint, test)
+just check      # Run all checks (fmt, vet, lint, test, cover)
 just dev        # Build and run
 just clean      # Remove build artifacts
 just install    # Install to GOPATH/bin

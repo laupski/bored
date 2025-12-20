@@ -1,3 +1,5 @@
+// Package tui provides the terminal user interface for bored using the Bubble Tea framework.
+// It implements views for configuration, board display, work item creation, and detail editing.
 package tui
 
 import (
@@ -13,19 +15,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// NotificationCheckInterval is how often to check for work item changes
+// NotificationCheckInterval is how often to check for work item changes.
 const NotificationCheckInterval = 30 * time.Second
 
+// View represents the current screen being displayed in the TUI.
 type View int
 
+// View constants for the different screens in the application.
 const (
-	ViewConfig View = iota
-	ViewBoard
-	ViewCreate
-	ViewDetail
-	ViewConfigFile
+	ViewConfig     View = iota // Configuration/login screen
+	ViewBoard                  // Main board listing work items
+	ViewCreate                 // Create new work item screen
+	ViewDetail                 // Work item detail/edit screen
+	ViewConfigFile             // Application settings screen
 )
 
+// Model is the main Bubble Tea model containing all application state.
 type Model struct {
 	view            View
 	client          *azdo.Client
@@ -149,6 +154,8 @@ var (
 			Bold(true)
 )
 
+// NewModel creates and initializes a new Model with default values.
+// It loads credentials from the keychain and app config from the config file.
 func NewModel() Model {
 	configInputs := make([]textinput.Model, 6)
 
@@ -299,6 +306,7 @@ func NewModel() Model {
 	return m
 }
 
+// Init implements tea.Model and returns the initial command to run.
 func (m Model) Init() tea.Cmd {
 	return textinput.Blink
 }
@@ -328,6 +336,7 @@ type workItemTypesMsg struct {
 	err   error
 }
 
+// Update implements tea.Model and handles all incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -617,6 +626,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View implements tea.Model and renders the current view as a string.
 func (m Model) View() string {
 	switch m.view {
 	case ViewConfig:

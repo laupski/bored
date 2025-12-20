@@ -1,3 +1,6 @@
+// Package azdo provides an HTTP client for interacting with the Azure DevOps REST API.
+// It supports work item CRUD operations, comments, iterations, planning fields,
+// hierarchy relationships, and hyperlinks.
 package azdo
 
 import (
@@ -11,6 +14,9 @@ import (
 	"strings"
 )
 
+// Client is an HTTP client for the Azure DevOps REST API.
+// It holds the organization, project, team, and area path configuration
+// along with authentication credentials.
 type Client struct {
 	Organization string
 	Project      string
@@ -20,6 +26,7 @@ type Client struct {
 	httpClient   *http.Client
 }
 
+// WorkItem represents an Azure DevOps work item with its fields and relations.
 type WorkItem struct {
 	ID        int                `json:"id"`
 	Rev       int                `json:"rev"`
@@ -28,6 +35,7 @@ type WorkItem struct {
 	Relations []WorkItemRelation `json:"relations,omitempty"`
 }
 
+// WorkItemRelation represents a link between work items or to external resources.
 type WorkItemRelation struct {
 	Rel        string                 `json:"rel"`
 	URL        string                 `json:"url"`
@@ -41,6 +49,7 @@ type Hyperlink struct {
 	Comment string // Optional description/comment
 }
 
+// WorkItemFields contains the standard and custom fields of a work item.
 type WorkItemFields struct {
 	Title         string       `json:"System.Title"`
 	State         string       `json:"System.State"`
@@ -61,11 +70,13 @@ type WorkItemFields struct {
 	Effort           *float64 `json:"Microsoft.VSTS.Scheduling.Effort,omitempty"`
 }
 
+// IdentityRef represents a user identity in Azure DevOps.
 type IdentityRef struct {
 	DisplayName string `json:"displayName"`
 	UniqueName  string `json:"uniqueName"`
 }
 
+// Comment represents a discussion comment on a work item.
 type Comment struct {
 	ID          int         `json:"id"`
 	Text        string      `json:"text"`
@@ -73,31 +84,37 @@ type Comment struct {
 	CreatedDate string      `json:"createdDate"`
 }
 
+// CommentsResponse is the API response when fetching work item comments.
 type CommentsResponse struct {
 	Count    int       `json:"count"`
 	Comments []Comment `json:"comments"`
 }
 
+// WorkItemQueryResult is the API response from a WIQL query.
 type WorkItemQueryResult struct {
 	WorkItems []WorkItemRef `json:"workItems"`
 }
 
+// WorkItemRef is a lightweight reference to a work item containing only ID and URL.
 type WorkItemRef struct {
 	ID  int    `json:"id"`
 	URL string `json:"url"`
 }
 
+// WorkItemListResponse is the API response when fetching multiple work items by ID.
 type WorkItemListResponse struct {
 	Count int        `json:"count"`
 	Value []WorkItem `json:"value"`
 }
 
+// CreateWorkItemOp represents a JSON Patch operation for creating or updating work items.
 type CreateWorkItemOp struct {
 	Op    string      `json:"op"`
 	Path  string      `json:"path"`
 	Value interface{} `json:"value"`
 }
 
+// WorkItemType represents a work item type definition (e.g., Bug, Task, User Story).
 type WorkItemType struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -107,11 +124,13 @@ type WorkItemType struct {
 	} `json:"icon"`
 }
 
+// WorkItemTypesResponse is the API response when fetching available work item types.
 type WorkItemTypesResponse struct {
 	Count int            `json:"count"`
 	Value []WorkItemType `json:"value"`
 }
 
+// Iteration represents a sprint or iteration in Azure DevOps.
 type Iteration struct {
 	ID         string               `json:"id"`
 	Name       string               `json:"name"`
@@ -119,18 +138,20 @@ type Iteration struct {
 	Attributes *IterationAttributes `json:"attributes,omitempty"`
 }
 
+// IterationAttributes contains the date range and time frame for an iteration.
 type IterationAttributes struct {
 	StartDate  string `json:"startDate,omitempty"`
 	FinishDate string `json:"finishDate,omitempty"`
 	TimeFrame  string `json:"timeFrame,omitempty"`
 }
 
+// IterationsResponse is the API response when fetching team iterations.
 type IterationsResponse struct {
 	Count int         `json:"count"`
 	Value []Iteration `json:"value"`
 }
 
-// WorkItemTypeField represents a field definition for a work item type
+// WorkItemTypeField represents a field definition for a work item type.
 type WorkItemTypeField struct {
 	ReferenceName  string      `json:"referenceName"`
 	Name           string      `json:"name"`
@@ -139,6 +160,7 @@ type WorkItemTypeField struct {
 	ReadOnly       bool        `json:"readOnly"`
 }
 
+// WorkItemTypeFieldsResponse is the API response when fetching fields for a work item type.
 type WorkItemTypeFieldsResponse struct {
 	Count int                 `json:"count"`
 	Value []WorkItemTypeField `json:"value"`
@@ -151,6 +173,7 @@ type PlanningField struct {
 	Value         *float64 // Current value
 }
 
+// NewClient creates a new Azure DevOps API client with the given configuration.
 func NewClient(org, project, team, areaPath, pat string) *Client {
 	return &Client{
 		Organization: org,
@@ -178,10 +201,12 @@ func (c *Client) teamURL() string {
 	return c.baseURL()
 }
 
+// GetWorkItems fetches work items of the specified type, limited to top results.
 func (c *Client) GetWorkItems(workItemType string, top int) ([]WorkItem, error) {
 	return c.GetWorkItemsFiltered(workItemType, "", top)
 }
 
+// GetWorkItemsFiltered fetches work items filtered by type and assignee.
 func (c *Client) GetWorkItemsFiltered(workItemType, assignedTo string, top int) ([]WorkItem, error) {
 	return c.GetWorkItemsPaged(workItemType, assignedTo, top, 0)
 }
@@ -296,10 +321,12 @@ func (c *Client) getWorkItemsByIDs(ids []string) ([]WorkItem, error) {
 	return result.Value, nil
 }
 
+// CreateWorkItem creates a new work item with the specified type, title, description, and priority.
 func (c *Client) CreateWorkItem(workItemType, title, description string, priority int) (*WorkItem, error) {
 	return c.CreateWorkItemWithAssignee(workItemType, title, description, priority, "")
 }
 
+// CreateWorkItemWithAssignee creates a new work item with an optional assignee.
 func (c *Client) CreateWorkItemWithAssignee(workItemType, title, description string, priority int, assignedTo string) (*WorkItem, error) {
 	createURL := fmt.Sprintf("%s/_apis/wit/workitems/$%s?api-version=7.0", c.baseURL(), url.PathEscape(workItemType))
 
@@ -510,6 +537,7 @@ func (c *Client) RemoveHierarchyLink(workItemID int, targetID int, isParent bool
 	return fmt.Errorf("relation not found")
 }
 
+// GetWorkItemTypes fetches the available work item types for the project.
 func (c *Client) GetWorkItemTypes() ([]string, error) {
 	typesURL := fmt.Sprintf("%s/_apis/wit/workitemtypes?api-version=7.0", c.baseURL())
 
@@ -547,6 +575,7 @@ func (c *Client) GetWorkItemTypes() ([]string, error) {
 	return types, nil
 }
 
+// GetComments fetches all comments for a work item.
 func (c *Client) GetComments(workItemID int) ([]Comment, error) {
 	commentsURL := fmt.Sprintf("%s/_apis/wit/workitems/%d/comments?api-version=7.0-preview.3", c.baseURL(), workItemID)
 
@@ -575,6 +604,7 @@ func (c *Client) GetComments(workItemID int) ([]Comment, error) {
 	return result.Comments, nil
 }
 
+// AddComment adds a new comment to a work item.
 func (c *Client) AddComment(workItemID int, text string) error {
 	commentURL := fmt.Sprintf("%s/_apis/wit/workitems/%d/comments?api-version=7.0-preview.3", c.baseURL(), workItemID)
 
@@ -602,6 +632,7 @@ func (c *Client) AddComment(workItemID int, text string) error {
 	return nil
 }
 
+// UpdateWorkItem updates the title, state, assignee, and tags of a work item.
 func (c *Client) UpdateWorkItem(workItemID int, title, state, assignedTo, tags string) (*WorkItem, error) {
 	updateURL := fmt.Sprintf("%s/_apis/wit/workitems/%d?api-version=7.0", c.baseURL(), workItemID)
 
@@ -771,6 +802,7 @@ func (c *Client) DeleteWorkItem(workItemID int) error {
 	return nil
 }
 
+// TestConnection verifies that the client can connect to Azure DevOps with the configured credentials.
 func (c *Client) TestConnection() error {
 	testURL := fmt.Sprintf("https://dev.azure.com/%s/_apis/projects/%s?api-version=7.0", c.Organization, c.Project)
 

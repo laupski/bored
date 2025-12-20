@@ -31,6 +31,11 @@ cover-html:
     go tool cover -html=coverage.out -o coverage.html
     open coverage.html
 
+# Serve godoc documentation locally
+doc:
+    @echo "Starting godoc server at http://localhost:6060/pkg/github.com/laupski/bored/"
+    go run golang.org/x/tools/cmd/godoc@latest -http=:6060
+
 # Format code
 fmt:
     go fmt ./...
