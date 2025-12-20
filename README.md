@@ -1,7 +1,5 @@
 # bored 😴
 
-[![Go Coverage](https://github.com/laupski/bored/wiki/coverage.svg)](https://raw.githack.com/wiki/laupski/bored/coverage.html)
-
 A TUI for Azure DevOps Boards
 
 ## Screenshots
