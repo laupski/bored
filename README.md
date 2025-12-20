@@ -67,6 +67,13 @@ See [releases](https://github.com/laupski/bored/releases) for more info.
 - [x] Change notifications with system sound alerts
 - [x] Automatic tracking of work item revisions
 
+## TODO
+
+- [ ] Redesign TUI to be more streamlined and intuitive
+- [ ] Add VHS tape files for terminal recordings and integrate into CI
+- [ ] Implement mocked config/keychain tests for improved coverage
+- [ ] Create CLI wrapper for `azdo/client.go` to enable scripting and automation
+
 ## License
 
 [Apache 2.0](./LICENSE)
