@@ -20,6 +20,17 @@ test:
 test-v:
     go test -v ./...
 
+# Run tests with coverage
+cover:
+    go test -coverprofile=coverage.out ./...
+    go tool cover -func=coverage.out
+
+# Run tests with coverage and open HTML report
+cover-html:
+    go test -coverprofile=coverage.out ./...
+    go tool cover -html=coverage.out -o coverage.html
+    open coverage.html
+
 # Format code
 fmt:
     go fmt ./...
@@ -37,7 +48,7 @@ lint:
     golangci-lint run
 
 # Run all checks (fmt, vet, lint, test)
-check: fmt vet lint test
+check: fmt vet lint test cover
 
 # Clean build artifacts
 clean:
