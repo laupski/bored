@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ```
 ├── main.go           # Application entry point
+├── doc.go            # Package documentation for pkg.go.dev
 ├── azdo/             # Azure DevOps API client
 │   └── client.go     # HTTP client for Azure DevOps REST API
 ├── tui/              # Terminal UI components

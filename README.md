@@ -26,7 +26,7 @@ See [releases](https://github.com/laupski/bored/releases) for more info.
 
 ## Features
 
-### Security & Configuration
+### Security and Configuration
 - [x] Keychained Credentials - PAT stored securely in system keychain
 - [x] TOML Config Support - Customizable settings in `~/.config/bored/config.toml`
 
@@ -42,7 +42,7 @@ See [releases](https://github.com/laupski/bored/releases) for more info.
 - [x] Add new comments
 - [x] @mention highlighting
 
-### Hierarchy & Related Items
+### Hierarchy and Related Items
 - [x] View parent/child relationships
 - [x] Create child work items
 - [x] Create parent work items
@@ -57,7 +57,7 @@ See [releases](https://github.com/laupski/bored/releases) for more info.
 - [x] Dynamic planning fields based on work item type
 - [x] Story Points, Original Estimate, Remaining Work, Completed Work
 
-### Filtering & Navigation
+### Filtering and Navigation
 - [x] Filter "My Items" vs "All Items"
 - [x] Server-side pagination for large backlogs
 - [x] Vim-style keyboard navigation (j/k, h/l)

@@ -593,32 +593,8 @@ func TestConfigNavigation(t *testing.T) {
 	}
 }
 
-func TestConfigConnect(t *testing.T) {
-	m := NewModel()
-	m.view = ViewConfig
-
-	// Set required values
-	m.configInputs[0].SetValue("org")
-	m.configInputs[1].SetValue("proj")
-	m.configInputs[2].SetValue("team")
-	m.configInputs[3].SetValue("area")
-	m.configInputs[4].SetValue("pat")
-	m.configInputs[5].SetValue("user")
-
-	// Press enter to connect
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(Model)
-
-	if m.client == nil {
-		t.Error("Enter should create client")
-	}
-	if !m.loading {
-		t.Error("Enter should set loading")
-	}
-	if m.username != "user" {
-		t.Errorf("Username should be set, got %s", m.username)
-	}
-}
+// NOTE: TestConfigConnect was removed because it called SaveCredentials()
+// which writes to the real system keychain during tests.
 
 func TestConfigOpenSettings(t *testing.T) {
 	m := NewModel()
