@@ -2526,4 +2526,3 @@ func TestWindowSizeMsg(t *testing.T) {
 		t.Errorf("Height should be 40, got %d", updated.height)
 	}
 }
-
