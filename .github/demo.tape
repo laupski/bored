@@ -1,7 +1,6 @@
 # VHS Demo Tape for bored TUI
 # https://github.com/charmbracelet/vhs
 
-Output demo.gif
 Output demo.mp4
 
 Set FontSize 14

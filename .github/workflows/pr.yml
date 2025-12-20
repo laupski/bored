@@ -79,6 +79,5 @@ jobs:
         with:
           name: demo-recording
           path: |
-            demo.gif
             demo.mp4
           retention-days: 3
