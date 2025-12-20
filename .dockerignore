@@ -1,0 +1,16 @@
+.git/
+.github/
+bin/
+*.md
+LICENSE
+Justfile
+.golangci.yml
+.goreleaser.yaml
+.claude*
+assets/
+mise.toml
+.gitignore
+.DS_Store
+Dockerfile
+coverage.out
+coverage.html

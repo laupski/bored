@@ -66,3 +66,11 @@ dev: build
 # Install the application to GOPATH/bin
 install:
     go install .
+
+# Build Docker image
+docker-build:
+    docker buildx build --load -t bored .
+
+# Run Docker container
+docker-run:
+    docker run --rm -it bored

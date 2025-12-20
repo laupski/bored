@@ -820,10 +820,21 @@ func (c *Client) TestConnection() error {
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("connection failed (%d): %s", resp.StatusCode, string(respBody))
+		errMsg := truncateError(string(respBody), 100)
+		return fmt.Errorf("connection failed (%d): %s", resp.StatusCode, errMsg)
 	}
 
 	return nil
+}
+
+// truncateError shortens error messages to a maximum length, useful for HTML responses
+func truncateError(msg string, maxLen int) string {
+	// Remove newlines and excess whitespace
+	msg = strings.Join(strings.Fields(msg), " ")
+	if len(msg) > maxLen {
+		return msg[:maxLen] + "..."
+	}
+	return msg
 }
 
 // GetIterations fetches available iterations for the team

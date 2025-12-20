@@ -1,8 +1,20 @@
 package tui
 
 import (
+	"os"
+
 	"github.com/zalando/go-keyring"
 )
+
+// isRunningInDocker checks if the application is running inside a Docker container
+func isRunningInDocker() bool {
+	// Also skip in test environment
+	if os.Getenv("GO_TEST_MODE") == "1" {
+		return true
+	}
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
+}
 
 const (
 	keychainService     = "bored-azdo-tui"
@@ -16,6 +28,9 @@ const (
 
 // SaveCredentials saves the Azure DevOps credentials to the system keychain
 func SaveCredentials(org, project, team, areaPath, pat, username string) error {
+	if isRunningInDocker() {
+		return nil
+	}
 	if err := keyring.Set(keychainService, keychainOrgKey, org); err != nil {
 		return err
 	}
@@ -39,6 +54,9 @@ func SaveCredentials(org, project, team, areaPath, pat, username string) error {
 
 // LoadCredentials loads the Azure DevOps credentials from the system keychain
 func LoadCredentials() (org, project, team, areaPath, pat, username string, err error) {
+	if isRunningInDocker() {
+		return "", "", "", "", "", "", keyring.ErrNotFound
+	}
 	org, err = keyring.Get(keychainService, keychainOrgKey)
 	if err != nil {
 		return "", "", "", "", "", "", err
@@ -68,6 +86,9 @@ func LoadCredentials() (org, project, team, areaPath, pat, username string, err 
 
 // ClearCredentials removes the stored credentials from the keychain
 func ClearCredentials() error {
+	if isRunningInDocker() {
+		return nil
+	}
 	_ = keyring.Delete(keychainService, keychainOrgKey)
 	_ = keyring.Delete(keychainService, keychainProjKey)
 	_ = keyring.Delete(keychainService, keychainTeamKey)
@@ -79,6 +100,9 @@ func ClearCredentials() error {
 
 // HasStoredCredentials checks if credentials are stored in the keychain
 func HasStoredCredentials() bool {
+	if isRunningInDocker() {
+		return false
+	}
 	_, err := keyring.Get(keychainService, keychainPATKey)
 	return err == nil
 }

@@ -87,6 +87,10 @@ func getConfigFilePath() (string, error) {
 
 // LoadConfigFile loads the application configuration from the config file
 func LoadConfigFile() (AppConfig, error) {
+	if isRunningInDocker() {
+		return DefaultConfig(), nil
+	}
+
 	configPath, err := getConfigFilePath()
 	if err != nil {
 		return DefaultConfig(), err
@@ -111,6 +115,10 @@ func LoadConfigFile() (AppConfig, error) {
 
 // SaveConfigFile saves the application configuration to the config file
 func SaveConfigFile(config AppConfig) error {
+	if isRunningInDocker() {
+		return nil
+	}
+
 	configPath, err := getConfigFilePath()
 	if err != nil {
 		return err
@@ -221,8 +229,12 @@ func (m Model) saveConfigFile() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Save to file
-	if err := SaveConfigFile(m.appConfig); err != nil {
+	// Save to file (skipped in Docker)
+	if isRunningInDocker() {
+		m.appConfigMessage = "Running in Docker - config not saved"
+		// Apply settings for this session only
+		m.showAll = m.appConfig.DefaultShowAll
+	} else if err := SaveConfigFile(m.appConfig); err != nil {
 		m.appConfigMessage = fmt.Sprintf("Error saving config: %v", err)
 	} else {
 		m.appConfigMessage = "Configuration saved successfully"

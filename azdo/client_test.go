@@ -2106,3 +2106,58 @@ func TestExtractWorkItemIDFromURLEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncateError(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxLen   int
+		expected string
+	}{
+		{
+			name:     "short message unchanged",
+			input:    "simple error",
+			maxLen:   100,
+			expected: "simple error",
+		},
+		{
+			name:     "long message truncated",
+			input:    "this is a very long error message that should be truncated",
+			maxLen:   20,
+			expected: "this is a very long ...",
+		},
+		{
+			name:     "newlines collapsed",
+			input:    "error\non\nmultiple\nlines",
+			maxLen:   100,
+			expected: "error on multiple lines",
+		},
+		{
+			name:     "whitespace normalized",
+			input:    "error   with    extra   spaces",
+			maxLen:   100,
+			expected: "error with extra spaces",
+		},
+		{
+			name:     "HTML response truncated",
+			input:    "<html><head><title>Error</title></head><body>Some long error page content here</body></html>",
+			maxLen:   30,
+			expected: "<html><head><title>Error</titl...",
+		},
+		{
+			name:     "exact length",
+			input:    "12345",
+			maxLen:   5,
+			expected: "12345",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateError(tt.input, tt.maxLen)
+			if result != tt.expected {
+				t.Errorf("truncateError(%q, %d) = %q, want %q", tt.input, tt.maxLen, result, tt.expected)
+			}
+		})
+	}
+}

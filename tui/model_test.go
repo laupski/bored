@@ -1,12 +1,19 @@
 package tui
 
 import (
+	"os"
 	"testing"
 
 	"github.com/laupski/bored/azdo"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func TestMain(m *testing.M) {
+	// Set test mode to skip keychain/config file access
+	os.Setenv("GO_TEST_MODE", "1")
+	os.Exit(m.Run())
+}
 
 func TestNewModel(t *testing.T) {
 	m := NewModel()
@@ -277,4 +284,45 @@ func TestViewReturnsString(t *testing.T) {
 			t.Errorf("View() for %v returned empty string", v)
 		}
 	}
+}
+
+func TestIsRunningInDocker(t *testing.T) {
+	// This test verifies the function runs without error
+	// The actual result depends on the environment
+	result := isRunningInDocker()
+	// In normal test environment, should return false
+	if result {
+		t.Log("Running in Docker environment")
+	} else {
+		t.Log("Not running in Docker environment")
+	}
+}
+
+func TestConnectMsgWithErrorState(t *testing.T) {
+	m := NewModel()
+	m.loading = true
+
+	// Test failed connection
+	testErr := &modelTestError{msg: "connection failed"}
+	msg := connectMsg{err: testErr}
+	newModel, _ := m.Update(msg)
+	updated := newModel.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false after connect error")
+	}
+	if updated.err == nil {
+		t.Error("err should be set after connect error")
+	}
+	if updated.view != ViewConfig {
+		t.Errorf("view should remain ViewConfig after error, got %v", updated.view)
+	}
+}
+
+type modelTestError struct {
+	msg string
+}
+
+func (e *modelTestError) Error() string {
+	return e.msg
 }

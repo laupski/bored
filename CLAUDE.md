@@ -66,3 +66,11 @@ just install    # Install to GOPATH/bin
 - Azure DevOps API interactions are centralized in the `azdo/` package
 - UI state and components are managed in the `tui/` package
 - PAT (Personal Access Token) is stored in the system keychain, not in config files
+
+## Testing Guidelines
+
+- **Never access the user's config.toml or system keychain during tests**
+- Tests use `GO_TEST_MODE=1` environment variable (set in `TestMain`) to skip keychain/config file operations
+- The `isRunningInDocker()` function returns `true` when `GO_TEST_MODE=1`, which bypasses credential and config storage
+- When adding new tests that involve `NewModel()`, the test mode is automatically applied
+- Do not write tests for `playNotificationSound` or `openBrowser` as these interact with external system resources

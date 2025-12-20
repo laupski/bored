@@ -36,8 +36,10 @@ func (m Model) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.username = username
 				m.loading = true
 
-				// Save credentials to keychain
-				if err := SaveCredentials(org, project, team, areaPath, pat, username); err != nil {
+				// Save credentials to keychain (skipped in Docker)
+				if isRunningInDocker() {
+					m.keychainMessage = "Running in Docker - credentials and config not saved"
+				} else if err := SaveCredentials(org, project, team, areaPath, pat, username); err != nil {
 					m.keychainMessage = "Warning: Could not save to keychain"
 				} else {
 					m.keychainMessage = "Credentials saved to keychain"
