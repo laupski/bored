@@ -1,4 +1,4 @@
-name: master workflow
+name: build
 
 on:
   push:
