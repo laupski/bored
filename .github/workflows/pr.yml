@@ -63,10 +63,16 @@ jobs:
       - name: Build
         run: go build -o bin/bored .
 
+      - name: Install VHS and dependencies
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+          sudo apt-get update
+          sudo apt-get install -y vhs ffmpeg ttyd
+
       - name: Record demo
-        uses: charmbracelet/vhs-action@main
-        with:
-          path: .github/demo.tape
+        run: vhs .github/demo.tape
 
       - name: Upload demo artifacts
         uses: actions/upload-artifact@v6
