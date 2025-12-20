@@ -10,20 +10,6 @@ import (
 	"testing"
 )
 
-// testClient creates a client configured to use a mock server
-func testClient(handler http.HandlerFunc) (*Client, *httptest.Server) {
-	server := httptest.NewServer(handler)
-	client := &Client{
-		Organization: "testorg",
-		Project:      "testproject",
-		Team:         "testteam",
-		AreaPath:     "TestProject\\TestTeam",
-		PAT:          "testpat",
-		httpClient:   server.Client(),
-	}
-	return client, server
-}
-
 // mockServerURL replaces the client's base URL for testing
 type mockTransport struct {
 	baseURL   string
@@ -1520,7 +1506,8 @@ func TestGetRelatedWorkItems(t *testing.T) {
 	requestCount := 0
 	client, server := testClientWithMockTransport(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
-		if requestCount == 1 {
+		switch requestCount {
+		case 1:
 			// Get work item with relations
 			response := WorkItem{
 				ID: 100,
@@ -1532,12 +1519,12 @@ func TestGetRelatedWorkItems(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
-		} else if requestCount == 2 {
+		case 2:
 			// Get parent
 			response := WorkItem{ID: 200, Fields: WorkItemFields{Title: "Parent"}}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
-		} else {
+		default:
 			// Get children
 			response := WorkItemListResponse{
 				Count: 2,

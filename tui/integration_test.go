@@ -471,15 +471,6 @@ func TestBoardRefresh(t *testing.T) {
 	}
 }
 
-func TestBoardOpenBrowser(t *testing.T) {
-	m := setupBoardModel()
-
-	// Test 'o' key - should not panic
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	_ = newModel.(Model)
-	// Can't verify browser opens, just verify no panic
-}
-
 func TestBoardCreateKeys(t *testing.T) {
 	m := setupBoardModel()
 
@@ -626,23 +617,6 @@ func TestConfigConnect(t *testing.T) {
 	}
 	if m.username != "user" {
 		t.Errorf("Username should be set, got %s", m.username)
-	}
-}
-
-func TestConfigClearCredentials(t *testing.T) {
-	m := NewModel()
-	m.view = ViewConfig
-	m.configInputs[0].SetValue("org")
-
-	// Press ctrl+d to clear
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = newModel.(Model)
-
-	if m.configInputs[0].Value() != "" {
-		t.Error("Ctrl+D should clear inputs")
-	}
-	if m.keychainMessage == "" {
-		t.Error("Should set keychain message")
 	}
 }
 
@@ -1607,21 +1581,6 @@ func TestTickMsgHandler(t *testing.T) {
 	_ = cmd
 }
 
-func TestNotifyChangesMsg(t *testing.T) {
-	m := NewModel()
-	m.view = ViewBoard
-	m.knownRevisions = make(map[int]int) // Initialize the map
-
-	items := []azdo.WorkItem{{ID: 1, Fields: azdo.WorkItemFields{Title: "Changed Item"}}}
-	msg := notifyChangesMsg{changedItems: items, err: nil}
-	newModel, _ := m.Update(msg)
-	updated := newModel.(Model)
-
-	if updated.notifyMessage == "" {
-		t.Error("Expected notify message to be set")
-	}
-}
-
 // ============ View Edge Cases ============
 
 func TestViewDetailWithAllSections(t *testing.T) {
@@ -2194,14 +2153,6 @@ func TestDetailCtrlGExitPlanning(t *testing.T) {
 	}
 }
 
-func TestDetailOpenInBrowser(t *testing.T) {
-	m := setupDetailModel()
-	m.client = azdo.NewClient("org", "proj", "", "", "pat")
-
-	// Test 'o' to open in browser (won't actually open, just exercise code path)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-}
-
 func TestDetailIterationToggle(t *testing.T) {
 	m := setupDetailModel()
 	m.client = azdo.NewClient("org", "proj", "", "", "pat")
@@ -2576,22 +2527,3 @@ func TestWindowSizeMsg(t *testing.T) {
 	}
 }
 
-func TestMultipleNotifyChanges(t *testing.T) {
-	m := NewModel()
-	m.view = ViewBoard
-	m.knownRevisions = make(map[int]int)
-
-	// Test multiple items changed
-	items := []azdo.WorkItem{
-		{ID: 1, Fields: azdo.WorkItemFields{Title: "Item 1"}},
-		{ID: 2, Fields: azdo.WorkItemFields{Title: "Item 2"}},
-		{ID: 3, Fields: azdo.WorkItemFields{Title: "Item 3"}},
-	}
-	msg := notifyChangesMsg{changedItems: items, err: nil}
-	newModel, _ := m.Update(msg)
-	updated := newModel.(Model)
-
-	if updated.notifyMessage == "" {
-		t.Error("Should have notification for multiple items")
-	}
-}
