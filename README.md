@@ -73,6 +73,7 @@ See [releases](https://github.com/laupski/bored/releases) for more info.
 - [ ] Add VHS tape files for terminal recordings and integrate into CI
 - [ ] Implement mocked config/keychain tests for improved coverage
 - [ ] Create CLI wrapper for `azdo/client.go` to enable scripting and automation
+- [ ] Add contacts page for easy look up for your organization
 
 ## License
 
