@@ -18,6 +18,7 @@ jobs:
         env:
           ADO_PAT: ${{ secrets.ADO_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADO_SYNC_DEBUG: 1
         run: |
           uv run sync_pr_to_ado.py \
             --pr-number ${{ github.event.pull_request.number }} \

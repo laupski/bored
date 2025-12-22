@@ -53,6 +53,15 @@ from pathlib import Path
 
 import httpx
 
+# Set to True for verbose debugging output
+DEBUG = os.environ.get("ADO_SYNC_DEBUG", "").lower() in ("1", "true", "yes")
+
+
+def debug(msg: str) -> None:
+    """Print debug message if DEBUG is enabled."""
+    if DEBUG:
+        print(f"[DEBUG] {msg}", file=sys.stderr)
+
 
 class AdoClient:
     """Client for Azure DevOps REST API."""
@@ -65,20 +74,42 @@ class AdoClient:
         self.headers = {
             "Authorization": f"Basic {auth_string}",
         }
+        debug(f"ADO Client initialized for {organization}/{project}")
+        debug(f"Base URL: {self.base_url}")
+        debug(f"PAT length: {len(pat)} characters")
+        debug(f"PAT prefix: {pat[:4]}..." if len(pat) > 4 else "PAT too short!")
+
+    def _log_response(self, method: str, url: str, response: httpx.Response) -> None:
+        """Log response details for debugging."""
+        debug(f"{method} {url}")
+        debug(f"Response status: {response.status_code}")
+        if response.status_code >= 400:
+            debug(f"Response headers: {dict(response.headers)}")
+            debug(f"Response body: {response.text[:500]}")
 
     def get_work_item(self, work_item_id: int) -> dict | None:
         """Fetch a work item by ID."""
         url = f"{self.base_url}/wit/workitems/{work_item_id}?api-version=7.0&$expand=relations"
+        debug(f"GET {url}")
         response = httpx.get(url, headers=self.headers)
+        self._log_response("GET", url, response)
         if response.status_code == 200:
             return response.json()
+        if response.status_code == 401:
+            print(
+                f"Authentication failed (401). Check your PAT token.", file=sys.stderr
+            )
+            print(f"URL: {url}", file=sys.stderr)
         return None
 
     def update_work_item(self, work_item_id: int, patch_document: list) -> bool:
         """Update a work item with a JSON patch document."""
         url = f"{self.base_url}/wit/workitems/{work_item_id}?api-version=7.0"
         headers = {**self.headers, "Content-Type": "application/json-patch+json"}
+        debug(f"PATCH {url}")
+        debug(f"Patch document: {patch_document}")
         response = httpx.patch(url, json=patch_document, headers=headers)
+        self._log_response("PATCH", url, response)
 
         if response.status_code == 200:
             return True
@@ -86,6 +117,12 @@ class AdoClient:
             f"Error updating work item #{work_item_id}: {response.status_code}",
             file=sys.stderr,
         )
+        if response.status_code == 401:
+            print(
+                "Authentication failed. Check your PAT token has the required scopes:",
+                file=sys.stderr,
+            )
+            print("  - Work Items (Read & Write)", file=sys.stderr)
         print(f"Details: {response.text}", file=sys.stderr)
         return False
 
@@ -95,11 +132,20 @@ class AdoClient:
         """Create a new work item."""
         url = f"{self.base_url}/wit/workitems/${work_item_type}?api-version=7.0"
         headers = {**self.headers, "Content-Type": "application/json-patch+json"}
+        debug(f"POST {url}")
+        debug(f"Patch document: {patch_document}")
         response = httpx.post(url, json=patch_document, headers=headers)
+        self._log_response("POST", url, response)
 
         if response.status_code == 200:
             return response.json()
         print(f"Error creating work item: {response.status_code}", file=sys.stderr)
+        if response.status_code == 401:
+            print(
+                "Authentication failed. Check your PAT token has the required scopes:",
+                file=sys.stderr,
+            )
+            print("  - Work Items (Read & Write)", file=sys.stderr)
         print(f"Details: {response.text}", file=sys.stderr)
         return None
 
@@ -107,10 +153,15 @@ class AdoClient:
         """Execute a WIQL query and return work items."""
         url = f"{self.base_url}/wit/wiql?api-version=7.0"
         headers = {**self.headers, "Content-Type": "application/json"}
+        debug(f"POST {url}")
+        debug(f"WIQL: {wiql}")
         response = httpx.post(url, json={"query": wiql}, headers=headers)
+        self._log_response("POST", url, response)
 
         if response.status_code != 200:
             print(f"Error executing query: {response.status_code}", file=sys.stderr)
+            if response.status_code == 401:
+                print("Authentication failed. Check your PAT token.", file=sys.stderr)
             return []
 
         work_item_refs = response.json().get("workItems", [])
@@ -120,7 +171,9 @@ class AdoClient:
         # Fetch full work item details
         ids = ",".join(str(ref["id"]) for ref in work_item_refs)
         url = f"{self.base_url}/wit/workitems?ids={ids}&api-version=7.0"
+        debug(f"GET {url}")
         response = httpx.get(url, headers=self.headers)
+        self._log_response("GET", url, response)
 
         if response.status_code == 200:
             return response.json().get("value", [])
@@ -129,21 +182,32 @@ class AdoClient:
     def get_comments(self, work_item_id: int) -> list[dict]:
         """Get all comments on a work item."""
         url = f"{self.base_url}/wit/workitems/{work_item_id}/comments?api-version=7.0-preview.3"
+        debug(f"GET {url}")
         response = httpx.get(url, headers=self.headers)
+        self._log_response("GET", url, response)
 
         if response.status_code == 200:
             return response.json().get("comments", [])
+        if response.status_code == 401:
+            print(
+                "Authentication failed fetching comments. Check your PAT token.",
+                file=sys.stderr,
+            )
         return []
 
     def add_comment(self, work_item_id: int, text: str) -> dict | None:
         """Add a comment to a work item."""
         url = f"{self.base_url}/wit/workitems/{work_item_id}/comments?api-version=7.0-preview.3"
         headers = {**self.headers, "Content-Type": "application/json"}
+        debug(f"POST {url}")
         response = httpx.post(url, json={"text": text}, headers=headers)
+        self._log_response("POST", url, response)
 
         if response.status_code == 200:
             return response.json()
         print(f"Error adding comment: {response.status_code}", file=sys.stderr)
+        if response.status_code == 401:
+            print("Authentication failed. Check your PAT token.", file=sys.stderr)
         print(f"Details: {response.text}", file=sys.stderr)
         return None
 
@@ -151,11 +215,15 @@ class AdoClient:
         """Update an existing comment on a work item."""
         url = f"{self.base_url}/wit/workitems/{work_item_id}/comments/{comment_id}?api-version=7.0-preview.3"
         headers = {**self.headers, "Content-Type": "application/json"}
+        debug(f"PATCH {url}")
         response = httpx.patch(url, json={"text": text}, headers=headers)
+        self._log_response("PATCH", url, response)
 
         if response.status_code == 200:
             return True
         print(f"Error updating comment: {response.status_code}", file=sys.stderr)
+        if response.status_code == 401:
+            print("Authentication failed. Check your PAT token.", file=sys.stderr)
         print(f"Details: {response.text}", file=sys.stderr)
         return False
 
@@ -542,8 +610,19 @@ def main():
         "--github-token",
         help="GitHub token for API access (or set GITHUB_TOKEN env var)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug output (or set ADO_SYNC_DEBUG=1)",
+    )
 
     args = parser.parse_args()
+
+    # Enable debug mode if --debug flag is set
+    global DEBUG
+    if args.debug:
+        DEBUG = True
+        debug("Debug mode enabled via --debug flag")
 
     # Validate arguments
     if args.pr_number and not args.repo:
