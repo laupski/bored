@@ -1,0 +1,25 @@
+name: Sync PR to ADO
+
+on:
+  pull_request:
+    types: [opened, edited]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Sync PR description to ADO
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADO_SYNC_DEBUG: 1
+        run: |
+          uv run sync_pr_to_ado.py \
+            --pr-number ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }}
