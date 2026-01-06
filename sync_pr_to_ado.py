@@ -16,8 +16,6 @@ Supports:
 - Tags: "ADO Tags: tag1, tag2, tag3" - replaces all tags on the work item
 - Child Items: "ADO Children:" followed by a list of items - creates tasks
   as children of the work item (idempotent, won't create duplicates)
-- Comment: "ADO Comment:" followed by text - adds a comment to the work item
-  (idempotent, updates existing comment from this sync tool)
 - Links: "ADO Links:" followed by a list of URLs with optional names -
   adds hyperlinks to the work item (idempotent, won't create duplicates)
 
@@ -31,7 +29,6 @@ Example PR description:
 
     ADO Card: 12345
     ADO Tags: frontend, bug-fix, priority-high
-    ADO Comment: This work is being tracked in PR #123
     ADO Links:
     - https://github.com/org/repo/pull/123 | PR #123
     - https://docs.example.com/feature-spec
@@ -175,54 +172,6 @@ class AdoClient:
             return response.json().get("value", [])
         return []
 
-    def get_comments(self, work_item_id: int) -> list[dict]:
-        """Get all comments on a work item."""
-        url = f"{self.base_url}/wit/workitems/{work_item_id}/comments?api-version=7.0-preview.3"
-        debug(f"GET {url}")
-        response = httpx.get(url, headers=self.headers)
-        self._log_response("GET", url, response)
-
-        if response.status_code == 200:
-            return response.json().get("comments", [])
-        if response.status_code == 401:
-            print(
-                "Authentication failed fetching comments. Check your PAT token.",
-                file=sys.stderr,
-            )
-        return []
-
-    def add_comment(self, work_item_id: int, text: str) -> dict | None:
-        """Add a comment to a work item."""
-        url = f"{self.base_url}/wit/workitems/{work_item_id}/comments?api-version=7.0-preview.3"
-        headers = {**self.headers, "Content-Type": "application/json"}
-        debug(f"POST {url}")
-        response = httpx.post(url, json={"text": text}, headers=headers)
-        self._log_response("POST", url, response)
-
-        if response.status_code == 200:
-            return response.json()
-        print(f"Error adding comment: {response.status_code}", file=sys.stderr)
-        if response.status_code == 401:
-            print("Authentication failed. Check your PAT token.", file=sys.stderr)
-        print(f"Details: {response.text}", file=sys.stderr)
-        return None
-
-    def update_comment(self, work_item_id: int, comment_id: int, text: str) -> bool:
-        """Update an existing comment on a work item."""
-        url = f"{self.base_url}/wit/workitems/{work_item_id}/comments/{comment_id}?api-version=7.0-preview.3"
-        headers = {**self.headers, "Content-Type": "application/json"}
-        debug(f"PATCH {url}")
-        response = httpx.patch(url, json={"text": text}, headers=headers)
-        self._log_response("PATCH", url, response)
-
-        if response.status_code == 200:
-            return True
-        print(f"Error updating comment: {response.status_code}", file=sys.stderr)
-        if response.status_code == 401:
-            print("Authentication failed. Check your PAT token.", file=sys.stderr)
-        print(f"Details: {response.text}", file=sys.stderr)
-        return False
-
 
 def get_ado_pat() -> str:
     """Get ADO PAT from environment variable."""
@@ -278,20 +227,6 @@ def extract_children(pr_description: str) -> list[str]:
         items = re.findall(r"[-*]\s*(.+)", items_block)
         return [item.strip() for item in items if item.strip()]
     return []
-
-
-def extract_comment(pr_description: str) -> str | None:
-    """Extract comment text from PR description.
-
-    Looks for pattern: "ADO Comment: <text>" (single line or multiline until next ADO directive)
-    """
-    # Match single line comment
-    pattern = r"ADO\s*Comment\s*:\s*(.+?)(?:\n(?=ADO\s)|$)"
-    match = re.search(pattern, pr_description, re.IGNORECASE | re.DOTALL)
-
-    if match:
-        return match.group(1).strip()
-    return None
 
 
 def extract_links(pr_description: str) -> list[tuple[str, str]]:
@@ -484,37 +419,6 @@ def sync_child_items(
             print(f"  Failed to create child: '{title}'", file=sys.stderr)
 
 
-# Marker used to identify comments created by this sync tool
-COMMENT_MARKER = "<!-- ado-sync-comment -->"
-
-
-def sync_comment(client: AdoClient, work_item_id: int, comment_text: str) -> None:
-    """Add or update a comment on the work item.
-
-    Uses a marker to identify comments created by this tool for idempotency.
-    """
-    if not comment_text:
-        return
-
-    # Add marker to comment
-    full_comment = f"{COMMENT_MARKER}\n{comment_text}"
-
-    # Check for existing comment with our marker
-    comments = client.get_comments(work_item_id)
-
-    for comment in comments:
-        if COMMENT_MARKER in comment.get("text", ""):
-            # Update existing comment
-            if client.update_comment(work_item_id, comment["id"], full_comment):
-                print(f"Updated existing comment (#{comment['id']})")
-            return
-
-    # No existing comment found, create new one
-    result = client.add_comment(work_item_id, full_comment)
-    if result:
-        print(f"Added new comment (#{result['id']})")
-
-
 def get_existing_hyperlinks(client: AdoClient, work_item_id: int) -> set[str]:
     """Get existing hyperlink URLs on a work item."""
     work_item = client.get_work_item(work_item_id)
@@ -629,18 +533,15 @@ def main():
 
     print(f"Found ADO Card: #{ado_card_number}")
 
-    # Extract tags, children, comment, and links
+    # Extract tags, children, and links
     tags = extract_tags(pr_description)
     children = extract_children(pr_description)
-    comment = extract_comment(pr_description)
     links = extract_links(pr_description)
 
     if tags:
         print(f"Found tags: {', '.join(tags)}")
     if children:
         print(f"Found {len(children)} child items to sync")
-    if comment:
-        print("Found comment to sync")
     if links:
         print(f"Found {len(links)} links to sync")
 
@@ -659,11 +560,6 @@ def main():
     if children:
         print("Syncing child items...")
         sync_child_items(client, ado_card_number, children)
-
-    # Sync comment
-    if comment:
-        print("Syncing comment...")
-        sync_comment(client, ado_card_number, comment)
 
     # Sync hyperlinks
     if links:
