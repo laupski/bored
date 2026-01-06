@@ -27,7 +27,6 @@ The ADO PAT is read from the environment variable specified in metadata.json
 
 Usage:
     uv run sync_pr_to_ado.py --pr-number <number> --repo <owner/repo>
-    uv run sync_pr_to_ado.py --pr-description "<description>"
 
 Example PR description:
     This PR implements feature X.
@@ -588,21 +587,19 @@ def sync_hyperlinks(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sync GitHub PR description to Azure DevOps work item"
-    )
-
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--pr-description",
-        help="PR description text (use this if you already have the description)",
-    )
-    group.add_argument(
-        "--pr-number", type=int, help="GitHub PR number to fetch description from"
+        description="Sync GitHub PR metadata to Azure DevOps work item"
     )
 
     parser.add_argument(
+        "--pr-number",
+        type=int,
+        required=True,
+        help="GitHub PR number to fetch description from",
+    )
+    parser.add_argument(
         "--repo",
-        help="GitHub repository in owner/repo format (required with --pr-number)",
+        required=True,
+        help="GitHub repository in owner/repo format",
     )
     parser.add_argument(
         "--github-token",
@@ -622,18 +619,9 @@ def main():
         DEBUG = True
         debug("Debug mode enabled via --debug flag")
 
-    # Validate arguments
-    if args.pr_number and not args.repo:
-        parser.error("--repo is required when using --pr-number")
-
-    # Get PR description
-    if args.pr_description:
-        pr_description = args.pr_description
-    else:
-        github_token = args.github_token or os.environ.get("GITHUB_TOKEN")
-        pr_description = get_github_pr_description(
-            args.repo, args.pr_number, github_token
-        )
+    # Fetch PR description from GitHub
+    github_token = args.github_token or os.environ.get("GITHUB_TOKEN")
+    pr_description = get_github_pr_description(args.repo, args.pr_number, github_token)
 
     if not pr_description:
         print("Error: PR description is empty", file=sys.stderr)
