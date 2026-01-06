@@ -6,11 +6,11 @@
 # ]
 # ///
 """
-Sync GitHub PR description to Azure DevOps work item.
+Sync GitHub PR metadata to Azure DevOps work item.
 
 This script extracts the ADO work item number from a GitHub PR description
-(looking for "ADO Card: <number>") and updates the corresponding work item
-with the PR description.
+(looking for "ADO Card: <number>") and syncs metadata to the corresponding
+work item.
 
 Supports:
 - Tags: "ADO Tags: tag1, tag2, tag3" - replaces all tags on the work item
@@ -313,21 +313,6 @@ def extract_comment(pr_description: str) -> str | None:
     return None
 
 
-def extract_description(pr_description: str) -> str:
-    """Extract the description section from PR description.
-
-    Looks for content under "## Description" heading until the next heading or ADO directive.
-    Returns the extracted description or empty string if not found.
-    """
-    # Match ## Description followed by content until next ## heading or ADO directive
-    pattern = r"##\s*Description\s*\n(.*?)(?=\n##\s|\nADO\s|$)"
-    match = re.search(pattern, pr_description, re.IGNORECASE | re.DOTALL)
-
-    if match:
-        return match.group(1).strip()
-    return ""
-
-
 def extract_links(pr_description: str) -> list[tuple[str, str]]:
     """Extract hyperlinks from PR description.
 
@@ -390,13 +375,11 @@ def get_github_pr_description(
     return response.json().get("body", "")
 
 
-def update_work_item_description_and_tags(
-    client: AdoClient, work_item_id: int, description: str, tags: list[str]
+def update_work_item_tags(
+    client: AdoClient, work_item_id: int, tags: list[str]
 ) -> bool:
-    """Update work item description and tags."""
-    patch_document = [
-        {"op": "replace", "path": "/fields/System.Description", "value": description}
-    ]
+    """Update work item tags."""
+    patch_document = []
 
     # Tags are stored as a semicolon-separated string
     if tags:
@@ -666,17 +649,12 @@ def main():
 
     print(f"Found ADO Card: #{ado_card_number}")
 
-    # Extract description, tags, children, comment, and links
-    description = extract_description(pr_description)
+    # Extract tags, children, comment, and links
     tags = extract_tags(pr_description)
     children = extract_children(pr_description)
     comment = extract_comment(pr_description)
     links = extract_links(pr_description)
 
-    if description:
-        print("Found description section")
-    else:
-        print("Warning: No ## Description section found in PR description")
     if tags:
         print(f"Found tags: {', '.join(tags)}")
     if children:
@@ -702,13 +680,12 @@ def main():
     pat = get_ado_pat(metadata)
     client = AdoClient(organization, project, pat)
 
-    # Update description and tags
-    if update_work_item_description_and_tags(
-        client, ado_card_number, description, tags
-    ):
-        print(f"Successfully updated ADO work item #{ado_card_number}")
-    else:
-        sys.exit(1)
+    # Update tags
+    if tags:
+        if update_work_item_tags(client, ado_card_number, tags):
+            print(f"Successfully updated tags on ADO work item #{ado_card_number}")
+        else:
+            sys.exit(1)
 
     # Sync child items
     if children:
