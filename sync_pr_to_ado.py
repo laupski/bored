@@ -21,12 +21,10 @@ Supports:
 - Links: "ADO Links:" followed by a list of URLs with optional names -
   adds hyperlinks to the work item (idempotent, won't create duplicates)
 
-Configuration is read from .ado/metadata.json in the repository root.
-The ADO PAT is read from the environment variable specified in metadata.json
-(defaults to ADO_PAT).
+The ADO PAT is read from the ADO_PAT environment variable.
 
 Usage:
-    uv run sync_pr_to_ado.py --pr-number <number> --repo <owner/repo>
+    uv run sync_pr_to_ado.py --pr-number <number> --repo <owner/repo> --ado-org <org> --ado-project <project>
 
 Example PR description:
     This PR implements feature X.
@@ -48,7 +46,6 @@ import base64
 import os
 import re
 import sys
-from pathlib import Path
 
 import httpx
 
@@ -227,27 +224,12 @@ class AdoClient:
         return False
 
 
-def load_ado_metadata() -> dict:
-    """Load ADO configuration from .ado/metadata.json."""
-    metadata_path = Path(__file__).parent / ".ado" / "metadata.json"
-
-    if not metadata_path.exists():
-        print(f"Error: ADO metadata file not found at {metadata_path}", file=sys.stderr)
-        sys.exit(1)
-
-    import json
-
-    with open(metadata_path) as f:
-        return json.load(f)
-
-
-def get_ado_pat(metadata: dict) -> str:
+def get_ado_pat() -> str:
     """Get ADO PAT from environment variable."""
-    env_var = metadata.get("pat_env_var", "ADO_PAT")
-    pat = os.environ.get(env_var)
+    pat = os.environ.get("ADO_PAT")
 
     if not pat:
-        print(f"Error: Environment variable {env_var} is not set", file=sys.stderr)
+        print("Error: Environment variable ADO_PAT is not set", file=sys.stderr)
         sys.exit(1)
 
     return pat
@@ -602,6 +584,16 @@ def main():
         help="GitHub repository in owner/repo format",
     )
     parser.add_argument(
+        "--ado-org",
+        required=True,
+        help="Azure DevOps organization name",
+    )
+    parser.add_argument(
+        "--ado-project",
+        required=True,
+        help="Azure DevOps project name",
+    )
+    parser.add_argument(
         "--github-token",
         help="GitHub token for API access (or set GITHUB_TOKEN env var)",
     )
@@ -652,21 +644,9 @@ def main():
     if links:
         print(f"Found {len(links)} links to sync")
 
-    # Load ADO configuration
-    metadata = load_ado_metadata()
-    organization = metadata.get("organization")
-    project = metadata.get("project")
-
-    if not organization or not project:
-        print(
-            "Error: 'organization' and 'project' are required in metadata.json",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    # Create client and sync
-    pat = get_ado_pat(metadata)
-    client = AdoClient(organization, project, pat)
+    # Create ADO client
+    pat = get_ado_pat()
+    client = AdoClient(args.ado_org, args.ado_project, pat)
 
     # Update tags
     if tags:
